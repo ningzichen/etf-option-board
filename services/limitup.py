@@ -1146,10 +1146,21 @@ def overview(date: str | None = None, *, days: int = 11, top: int = 15,
     with _conn() as c:
         meta = c.execute("SELECT * FROM lu_meta WHERE date=?", (d,)).fetchone()
 
+    # 统计期间热门主题：把窗口内每个主题的涨停数累加，取前 5（顶部条展示）
+    period: dict[str, dict[str, Any]] = {}
+    for x in cols:
+        for t in by_date.get(x, []):
+            if not t.get("board"):
+                continue
+            slot = period.setdefault(t["board"], {"board": t["board"], "name": t["name"], "zt": 0})
+            slot["zt"] += int(t.get("zt") or 0)
+    period_top = sorted(period.values(), key=lambda t: -t["zt"])[:5]
+
     return {
         "date": d,
         "mode": mode,
         "dates": cols,
+        "period_top": period_top,
         "matrix": matrix,
         "themes": themes,
         "tiers": TIERS,
@@ -1252,7 +1263,9 @@ def prism(theme: str | None = None, date: str | None = None,
         name = r["name"] if r else board
     totals = {r["date"]: int((r["total_ext"] if mode == "ext" else r["total_zt"]) or 0)
               for r in _meta_rows(dates)}
-    tseries = _theme_series([board] if board else [], dates, mode).items() if board else []
+    # 主题线也用**板块口径**：否则棱镜标题会写"3 家"、主题榜写"5 家"，同一页两个数
+    base_mode = mode[:-4] if mode.endswith("_hot") else mode
+    tseries = _theme_series([board] if board else [], dates, base_mode).items() if board else []
     tmap = {b: v["zt"] for b, v in tseries}
     tvals = tmap.get(board, [0] * len(dates))
     return {
@@ -1428,7 +1441,8 @@ async def brief(date: str | None = None, mode: str = "zt", sort: str = "hot",
         meta = c.execute("SELECT * FROM lu_meta WHERE date=?", (d,)).fetchone()
         rows = c.execute(
             "SELECT board, name, zt, max_lbc, pct, main FROM lu_themes "
-            "WHERE mode=? AND date=? ORDER BY zt DESC", (mode_key, d)).fetchall()
+            "WHERE mode=? AND date=? ORDER BY zt DESC",
+            (mode_key[:-4] if mode_key.endswith("_hot") else mode_key, d)).fetchall()
     if theme:
         # 明确点名某个板块时，排除名单与等级筛选都让位（用户就是要看它）
         rows = [r for r in rows if r["board"] == theme][:1]

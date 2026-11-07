@@ -48,6 +48,13 @@ function heatStyle(heat: number, selected: boolean) {
   return { backgroundColor: `rgba(37,99,235,${a.toFixed(3)})` };
 }
 
+/** 选中主题的红底：**按涨停家数分深浅**（当天 0 家时最浅，窗口内最多家的那天最深） */
+function selectedStyle(zt: number, maxZt: number) {
+  const ratio = maxZt > 0 ? Math.max(0.12, Math.min(1, zt / maxZt)) : 1;
+  const a = 0.35 + 0.65 * ratio;
+  return { backgroundColor: `rgba(225,29,72,${a.toFixed(3)})`, color: "#ffffff" };
+}
+
 /* ============================ 页面 ============================ */
 /**
  * 涨停复盘（页面名）：沪深 A 股涨停板扫描 + 主题分类。
@@ -62,7 +69,7 @@ function heatStyle(heat: number, selected: boolean) {
  * 页面一次 `overview` 请求拿齐 ①③，②④ 跟着所选主题联动。
  */
 export function LimitUpPage() {
-  const [date, setDate] = useState("");
+  const [date] = useState("");
   const [theme, setTheme] = useState("");
   const [days, setDays] = useState(11);
   /** 主题等级：all / primary（一级主题）/ secondary（二级主题），按板块成分股数分档 */
@@ -139,6 +146,10 @@ export function LimitUpPage() {
     if (onlyResonance && !t.resonance) return false;
     return true;
   }), [themes, type, onlyExpand, onlyClimax, onlyResonance, dropST]);
+
+  /** 选中主题在窗口内的最大涨停家数：红底深浅按它归一 */
+  const themeMaxZt = Math.max(1, ...(ov?.matrix ?? [])
+    .flatMap((col) => col.filter((c): c is Cell => !!c && c.board === theme).map((c) => c.zt)));
 
   /** 周期表：同样过滤后，每列重新按名次排列（缺位补空） */
   const matrix = useMemo(() => {
@@ -222,15 +233,6 @@ export function LimitUpPage() {
           >
             {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
-          <select
-            value={curDate}
-            onChange={(e) => { setDate(e.target.value); setCellDate(""); }}
-            className="h-7 rounded border bg-background px-2 text-xs"
-          >
-            {(dates.length ? [...dates].reverse() : [curDate]).filter(Boolean).map((d) => (
-              <option key={d} value={d}>{d}</option>
-            ))}
-          </select>
           <button
             onClick={onRefresh}
             disabled={busy}
@@ -305,17 +307,36 @@ export function LimitUpPage() {
               </span>
             </FrameHeader>
             <FramePanel className="p-0">
+              {/* 统计期间热门主题（窗口内累计涨停家数） */}
+              {(ov?.period_top ?? []).length > 0 && (
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-1 border-b bg-muted/30 px-3 py-2 text-[12px]">
+                  <span className="text-muted-foreground">期间热门：</span>
+                  {(ov?.period_top ?? []).map((t, i) => (
+                    <button key={t.board} onClick={() => setTheme(t.board)}
+                      className={cn("flex items-center gap-1.5 hover:underline",
+                        t.board === theme ? "font-semibold text-rose-600" : "text-foreground")}>
+                      <span className="text-muted-foreground">{i + 1}.</span>
+                      {t.name}
+                      <span className="rounded bg-rose-100 px-1 text-[11px] font-medium text-rose-700">{t.zt}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-[11px]">
+                <table className="w-full border-collapse text-[12px]">
                   <thead>
                     <tr className="bg-muted/40">
-                      <th className="w-9 border-b px-1 py-[5px] text-center font-normal text-muted-foreground">
+                      <th className="w-12 border-b px-2 py-2.5 text-center font-normal text-muted-foreground">
                         排名
                       </th>
                       {dates.map((d) => (
                         <th key={d}
-                          className={cn("border-b px-1 py-[5px] text-center font-normal text-muted-foreground",
-                            d === curDate && "bg-primary/10 text-foreground")}
+                          className={cn(
+                            "border-b px-2 py-2.5 text-center font-normal text-muted-foreground",
+                            d === curDate
+                              ? "border-x-2 border-t-2 border-rose-500 bg-rose-50 font-medium text-rose-700"
+                              : "",
+                          )}
                           title={d}>
                           {fmtMD(d)}
                         </th>
@@ -325,20 +346,26 @@ export function LimitUpPage() {
                   <tbody>
                     {Array.from({ length: 15 }).map((_, r) => (
                       <tr key={r}>
-                        <td className="border-b px-1 py-[4px] text-center text-muted-foreground">{r + 1}</td>
+                        <td className="border-b px-2 py-2 text-center text-muted-foreground">{r + 1}</td>
                         {matrix.map((col, ci) => {
                           const cell = col[r] ?? null;
                           const active = cell?.board === theme;
+                          const isCurCol = dates[ci] === curDate;
                           return (
                             <td
                               key={ci}
                               onClick={() => { if (!cell) return; setTheme(cell.board); setCellDate(dates[ci]); }}
                               className={cn(
-                                "border-b px-1 py-[4px] text-center",
+                                "border-b px-2 py-2 text-center",
                                 cell ? "cursor-pointer" : "",
                                 active ? "font-medium" : "text-slate-800 hover:brightness-[0.97]",
+                                isCurCol && "border-x-2 border-rose-500",
+                                isCurCol && r === 14 && "border-b-2",
                               )}
-                              style={cell ? heatStyle(cell.heat ?? 0, !!active) : undefined}
+                              style={cell
+                                ? (active ? selectedStyle(cell.zt, themeMaxZt)
+                                  : heatStyle(cell.heat ?? 0, false))
+                                : undefined}
                               title={cell
                                 ? `${cell.name}：${cell.zt} 家涨停（近7日 ${cell.count_7d ?? cell.zt}，综合排名强度 ${Math.round((cell.heat ?? 0) * 100)}%）`
                                 : ""}
