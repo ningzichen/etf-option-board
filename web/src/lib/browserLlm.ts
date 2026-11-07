@@ -110,6 +110,12 @@ function modelRequest(config: LlmConfig, system: string, user: string): ModelReq
     if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
     body.messages = [{ role: "system", content: system }, { role: "user", content: user }];
   }
+  // opencode zen 的免费模型必须带会话标识，否则会被拦（"Free models work in OpenCode"）。
+  try {
+    if (new URL(llmEndpoint(config)).hostname.endsWith("opencode.ai")) {
+      headers["x-opencode-session"] = crypto.randomUUID().replace(/-/g, "");
+    }
+  } catch { /* URL 不合法时留给 validateLlmConfig 报错 */ }
   return { url: llmEndpoint(config), headers, body: JSON.stringify(body) };
 }
 

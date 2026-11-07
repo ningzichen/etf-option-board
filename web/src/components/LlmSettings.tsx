@@ -53,11 +53,36 @@ export function LlmSettings() {
     }
   };
 
+  /** 一键填入 opencode zen 的免费模型（API Key 由用户自己粘） */
+  const useZenFree = () => {
+    setStatus(""); setError("");
+    setConfig((old) => ({
+      ...old,
+      protocol: "openai",
+      transport: "proxy",                 // 走看板后端代理，绕开 zen 的跨域限制
+      baseUrl: "https://opencode.ai/zen/v1",
+      model: "deepseek-v4.1-flash-free",
+      maxTokens: defaultMaxTokens("openai"),
+    }));
+    setStatus("已填入 opencode zen 免费模型参数，粘贴 API Key 后点「保存模型配置」");
+  };
+
   return <div className="space-y-4 text-xs">
     <div className="rounded-md bg-muted/40 px-3 py-2 leading-relaxed text-muted-foreground">
       配置和 API Key 仅保存在当前浏览器的本地存储中。行情快照由看板提供，模型请求按下方选择的方式发送。
       <br />填写 Base URL / 模型 ID / API Key 即可，**期权决策**与**涨停复盘的涨停分析**都用这套配置
       （涨停复盘不再依赖 opencode）。
+    </div>
+    <div className="space-y-1.5">
+      <div className="font-medium">快速填入</div>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="outline" onClick={useZenFree}>opencode zen 免费模型</Button>
+      </div>
+      <div className="leading-relaxed text-muted-foreground">
+        免费模型在额度内可用（每天 08:00 北京时间恢复）。API Key 用 opencode 的 key
+        （`~/.local/share/opencode/auth.json` 里 `opencode-go` 那条），或登录 opencode.ai 自助获取。
+        免费额度用尽时会返回 429，此时「涨停复盘」会退回规则文案。
+      </div>
     </div>
     <div className="space-y-1.5">
       <div className="font-medium">请求方式</div>
