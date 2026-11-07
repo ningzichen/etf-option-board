@@ -296,29 +296,7 @@ export function BriefDialog({
                   </div>
 
                   <div className="mt-2.5 grid gap-2 md:grid-cols-2">
-                    {t.stocks.map((s) => (
-                      <div key={s.code}
-                        className="rounded-lg border bg-card px-3.5 py-2.5 transition-colors hover:border-primary/40">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold">{s.name}</span>
-                          <Badge size="sm" radius="full"
-                            variant={s.lbc >= 3 ? "destructive" : s.lbc === 2 ? "warning-light" : "secondary"}>
-                            {s.lbc >= 2 ? `${s.lbc}连板` : "首板"}
-                          </Badge>
-                          <span className="text-[11px] text-muted-foreground">
-                            {s.code.startsWith("6") ? "SH" : "SZ"}{s.code}
-                          </span>
-                          <span className={cn("ml-auto text-sm font-semibold tabular-nums",
-                            (s.main_net ?? 0) >= 0 ? "text-rose-600" : "text-emerald-600")}>
-                            {s.main_net == null ? "-" : signedFlow(s.main_net)}
-                          </span>
-                        </div>
-                        <p className="mt-1.5 text-[13px] leading-6 text-slate-600">
-                          <span className="font-medium text-muted-foreground">原因 </span>
-                          {cleanReason(s.reason_detail) || cleanReason(s.reason) || "—"}
-                        </p>
-                      </div>
-                    ))}
+                    {t.stocks.map((s) => <StockCard key={s.code} s={s} />)}
                   </div>
                 </FramePanel>
               </Frame>
@@ -332,5 +310,45 @@ export function BriefDialog({
         )}
       </div>
     </Dialog>
+  );
+}
+
+/**
+ * 单只涨停股卡片。
+ *
+ * 同花顺的 `reason_info` 常有 300~500 字，整段铺开会把卡片顶到 350px+；
+ * 默认折到 3 行、给「展开全部」，需要细节时再点开 —— 这样一屏能多看好几只票。
+ */
+function StockCard({ s }: { s: BriefStock }) {
+  const [open, setOpen] = useState(false);
+  const text = cleanReason(s.reason_detail) || cleanReason(s.reason) || "—";
+  const long = text.length > 110;
+  return (
+    <div className="rounded-lg border bg-card px-3.5 py-2.5 transition-colors hover:border-primary/40">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-semibold">{s.name}</span>
+        <Badge size="sm" radius="full"
+          variant={s.lbc >= 3 ? "destructive" : s.lbc === 2 ? "warning-light" : "secondary"}>
+          {s.lbc >= 2 ? `${s.lbc}连板` : "首板"}
+        </Badge>
+        <span className="text-[11px] text-muted-foreground">
+          {s.code.startsWith("6") ? "SH" : "SZ"}{s.code}
+        </span>
+        <span className={cn("ml-auto text-sm font-semibold tabular-nums",
+          (s.main_net ?? 0) >= 0 ? "text-rose-600" : "text-emerald-600")}>
+          {s.main_net == null ? "-" : signedFlow(s.main_net)}
+        </span>
+      </div>
+      <p className={cn("mt-1.5 text-[13px] leading-6 text-slate-600",
+        long && !open && "line-clamp-3")}>
+        <span className="font-medium text-muted-foreground">原因 </span>{text}
+      </p>
+      {long && (
+        <button onClick={() => setOpen((v) => !v)}
+          className="mt-0.5 text-[11px] text-primary hover:underline">
+          {open ? "收起" : "展开全部"}
+        </button>
+      )}
+    </div>
   );
 }
