@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw, Settings2, Sparkles } from "lucide-react";
 import { Dialog } from "@/components/ui/misc";
+import { Badge } from "@/components/reui/badge";
+import { Frame, FramePanel, FrameHeader, FrameTitle } from "@/components/reui/frame";
 import { api } from "@/lib/api";
 import { browserChat, openLlmSettings, useLlmConfig } from "@/lib/browserLlm";
 import { pct, signedFlow } from "@/lib/format";
@@ -186,140 +188,142 @@ export function BriefDialog({
   const reasonOf = (t: BriefTheme) => ai?.reasons?.[t.name] || t.reason_text || "";
 
   return (
-    <Dialog open={open} onClose={onClose} title={null} className="w-[min(94vw,720px)] p-0">
-      <div className="flex items-center justify-between border-b px-4 py-2.5">
-        <div className="flex items-center gap-2">
-          <Sparkles size={14} className="text-rose-600" />
-          <span className="text-sm font-semibold">主题猎手-涨停分析</span>
-          {themeName && (
-            <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[11px] text-rose-700">{themeName}</span>
-          )}
-          <span className="text-[10px] text-muted-foreground">{data?.date || date || ""}</span>
-        </div>
-        <div className="flex items-center gap-2 pr-6">
-          <span className="text-[10px] text-muted-foreground">{stampOf(data, ai)}</span>
+    <Dialog open={open} onClose={onClose} title={null}
+      className="w-[min(96vw,980px)] p-0">
+      {/* ============ 顶部标题栏 ============ */}
+      <div className="flex flex-wrap items-center gap-2.5 border-b px-6 py-3.5 pr-12">
+        <Sparkles size={18} className="shrink-0 text-rose-600" />
+        <span className="text-base font-semibold tracking-tight">主题猎手 · 涨停分析</span>
+        {themeName && <Badge variant="primary-light" size="lg" radius="full">{themeName}</Badge>}
+        <span className="text-xs text-muted-foreground">{data?.date || date || ""}</span>
+        <div className="ml-auto flex items-center gap-2">
+          {ai && <Badge variant="secondary" size="sm" radius="full">{ai.model}</Badge>}
+          <span className="text-[11px] text-muted-foreground">{stampOf(data, ai)}</span>
           <button
             onClick={() => { dropCache(cacheKey); setAi(null); load(true); }}
             disabled={loading || thinking || !cfg}
             title={cfg ? "重新生成解读（会再调一次大模型）" : "未配置大模型"}
-            className="flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] hover:bg-accent disabled:opacity-50"
+            className="flex items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-accent disabled:opacity-50"
           >
-            <RefreshCw size={11} className={thinking ? "animate-spin" : ""} /> 重解读
+            <RefreshCw size={12} className={thinking ? "animate-spin" : ""} /> 重解读
           </button>
         </div>
       </div>
 
-      <div className="max-h-[78vh] overflow-auto px-4 py-3">
+      <div className="max-h-[80vh] overflow-auto px-6 py-5">
         {loading && !themes.length && (
-          <div className="py-16 text-center text-xs text-muted-foreground">加载当日数据…</div>
+          <div className="py-20 text-center text-sm text-muted-foreground">加载当日数据…</div>
         )}
 
         {err && !themes.length && (
-          <div className="py-10 text-center text-xs text-destructive">加载失败：{err}</div>
+          <div className="py-12 text-center text-sm text-destructive">加载失败：{err}</div>
         )}
 
         {!loading && !err && !themes.length && (
-          <div className="py-10 text-center text-xs text-muted-foreground">
+          <div className="py-12 text-center text-sm text-muted-foreground">
             {themeName ? `「${themeName}」当日没有涨停个股` : "没有可分析的板块"}
           </div>
         )}
 
         {themes.length > 0 && (
-          <>
-            <div className="text-center">
-              <div className="text-sm text-muted-foreground">
-                —— 主题猎手-涨停分析{themeName ? ` · ${themeName}` : ""} ——
+          <div className="space-y-5">
+            {/* ============ 解读主体 ============ */}
+            <section className="rounded-xl border border-rose-100 bg-rose-50/40 px-5 py-4">
+              <div className="flex items-center gap-2">
+                <Badge variant="destructive" size="sm" radius="full">涨停解读</Badge>
+                {data?.src === "rule" && !ai && (
+                  <span className="text-[11px] text-muted-foreground">（规则文案，未用大模型）</span>
+                )}
               </div>
-              <div className="mt-1 text-[11px] text-muted-foreground">{stampOf(data, ai)}</div>
-            </div>
+              <p className="mt-2 text-lg font-semibold leading-8 text-rose-700">
+                {headline || "—"}
+              </p>
+              {summary && (
+                <p className="mt-1.5 text-sm leading-6 text-muted-foreground">{summary}</p>
+              )}
+            </section>
 
-            {/* 未配置大模型 / 调用失败时的提示条 */}
+            {/* ============ 状态提示 ============ */}
             {!cfg && (
-              <div className="mt-3 flex items-center gap-2 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800">
-                <Settings2 size={12} />
+              <div className="flex items-center gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs leading-5 text-amber-800">
+                <Settings2 size={14} className="shrink-0" />
                 还没有配置大模型，当前显示的是规则拼接文案。
                 <button onClick={openLlmSettings}
-                  className="ml-auto rounded border border-amber-300 bg-white px-1.5 py-0.5 hover:bg-amber-100">
+                  className="ml-auto shrink-0 rounded-md border border-amber-300 bg-white px-2 py-1 hover:bg-amber-100">
                   去设置大模型
                 </button>
               </div>
             )}
             {cfg && thinking && (
-              <div className="mt-3 rounded border bg-muted/40 px-2 py-1.5 text-[11px] text-muted-foreground">
-                正在用 {cfg.model} 生成解读…
+              <div className="rounded-lg border bg-muted/40 px-3.5 py-2.5 text-xs text-muted-foreground">
+                正在用 <b className="text-foreground">{cfg.model}</b> 生成解读…
               </div>
             )}
             {aiErr && (
-              <div className="mt-3 rounded border border-destructive/30 bg-destructive/5 px-2 py-1.5 text-[11px] text-destructive">
+              <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-2.5 text-xs leading-5 text-destructive">
                 大模型调用失败（已回落到规则文案）：{aiErr}
               </div>
             )}
 
-            <p className="mt-3 text-[15px] font-semibold leading-6 text-rose-600">
-              涨停解读：{headline || "—"}
-            </p>
-            <p className="mt-2 text-[12px] leading-5 text-muted-foreground">{summary}</p>
-            <p className="mt-1 text-[10px] text-muted-foreground">
-              {ai ? `解读由 ${ai.model} 生成` : "规则拼接文案（未使用大模型）"}
-            </p>
-
-            <div className="mt-3 flex flex-col gap-3">
-              {themes.map((t) => (
-                <section key={t.board} className="border-t pt-3 first:border-t-0 first:pt-0">
-                  <div className="flex items-center gap-2 rounded bg-amber-50/70 px-2 py-1.5">
-                    <span className="text-[13px] font-semibold">{t.name}</span>
-                    <span className="text-[11px] text-muted-foreground">涨停 {t.zt} 家</span>
-                    <span className={cn("ml-auto rounded px-1.5 py-0.5 text-[11px] font-medium",
-                      (t.pct ?? 0) >= 0 ? "bg-rose-600 text-white" : "bg-emerald-600 text-white")}>
+            {/* ============ 各板块 ============ */}
+            {themes.map((t) => (
+              <Frame key={t.board} variant="inverse" spacing="sm">
+                <FramePanel className="pb-3.5">
+                  <FrameHeader className="flex-wrap items-center gap-2">
+                    <FrameTitle className="text-base font-semibold">{t.name}</FrameTitle>
+                    <Badge variant="primary-light" size="sm">涨停 {t.zt} 家</Badge>
+                    <Badge variant={(t.pct ?? 0) >= 0 ? "destructive" : "success"} size="sm">
                       涨幅 {t.pct == null ? "-" : pct(t.pct)}
-                    </span>
-                  </div>
-                  <p className="mt-1.5 text-[12px] leading-5 text-slate-700">
-                    <span className="text-muted-foreground">炒作原因：</span>
-                    {reasonOf(t) || "—"}
-                  </p>
+                    </Badge>
+                    {t.main != null && (
+                      <Badge variant="secondary" size="sm">
+                        主力 {signedFlow(t.main)}
+                      </Badge>
+                    )}
+                  </FrameHeader>
 
-                  <table className="mt-1.5 w-full text-[11px]">
-                    <thead>
-                      <tr className="text-muted-foreground">
-                        <th className="py-1 text-left font-normal">名称</th>
-                        <th className="w-16 py-1 text-left font-normal">类型</th>
-                        <th className="w-24 py-1 text-right font-normal">主力净买额</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {t.stocks.map((s) => (
-                        <tr key={s.code} className="border-t">
-                          <td className="py-1.5 align-top">
-                            <div className="font-medium">{s.name}</div>
-                            <div className="text-[10px] text-muted-foreground">
-                              {s.code.startsWith("6") ? "SH" : "SZ"}{s.code}
-                            </div>
-                            <div className="mt-0.5 text-[11px] leading-5 text-slate-600">
-                              <span className="text-muted-foreground">原因：</span>
-                              {s.reason_detail || s.reason || "—"}
-                            </div>
-                          </td>
-                          <td className="py-1.5 align-top">
-                            <span className={cn("rounded px-1 text-[10px]",
-                              s.lbc >= 3 ? "bg-rose-600 text-white"
-                                : s.lbc === 2 ? "bg-rose-100 text-rose-700"
-                                  : "bg-muted text-muted-foreground")}>
-                              {s.lbc >= 2 ? `${s.lbc}连板` : "首板"}
-                            </span>
-                          </td>
-                          <td className={cn("py-1.5 text-right align-top",
+                  <div className="mt-2 rounded-lg bg-muted/60 px-3.5 py-2.5">
+                    <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      炒作原因
+                    </div>
+                    <p className="text-[13px] leading-6 text-foreground">
+                      {reasonOf(t) || "—"}
+                    </p>
+                  </div>
+
+                  <div className="mt-2.5 grid gap-2 md:grid-cols-2">
+                    {t.stocks.map((s) => (
+                      <div key={s.code}
+                        className="rounded-lg border bg-card px-3.5 py-2.5 transition-colors hover:border-primary/40">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold">{s.name}</span>
+                          <Badge size="sm" radius="full"
+                            variant={s.lbc >= 3 ? "destructive" : s.lbc === 2 ? "warning-light" : "secondary"}>
+                            {s.lbc >= 2 ? `${s.lbc}连板` : "首板"}
+                          </Badge>
+                          <span className="text-[11px] text-muted-foreground">
+                            {s.code.startsWith("6") ? "SH" : "SZ"}{s.code}
+                          </span>
+                          <span className={cn("ml-auto text-sm font-semibold tabular-nums",
                             (s.main_net ?? 0) >= 0 ? "text-rose-600" : "text-emerald-600")}>
                             {s.main_net == null ? "-" : signedFlow(s.main_net)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </section>
-              ))}
-            </div>
-          </>
+                          </span>
+                        </div>
+                        <p className="mt-1.5 text-[13px] leading-6 text-slate-600">
+                          <span className="font-medium text-muted-foreground">原因 </span>
+                          {s.reason_detail || s.reason || "—"}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </FramePanel>
+              </Frame>
+            ))}
+
+            <p className="pt-1 text-center text-[11px] text-muted-foreground">
+              {ai ? `解读由 ${ai.model} 生成` : "规则拼接文案（未使用大模型）"} · 内容仅供参考，不构成投资建议
+            </p>
+          </div>
         )}
       </div>
     </Dialog>

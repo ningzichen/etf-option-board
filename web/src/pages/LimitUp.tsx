@@ -12,14 +12,14 @@ import { cn } from "@/lib/utils";
 /* ============================ 类型 ============================ */
 type Cell = {
   board: string; name: string; zt: number; max_lbc: number;
-  count_20d?: number; tier?: string; type?: string; heat?: number;
+  count_7d?: number; tier?: string; type?: string; heat?: number;
 };
 type ThemeRow = {
   board: string; name: string; zt: number; zb: number; lan: number;
   max_lbc: number; lianban: number; first_board: number;
   pct?: number | null; main?: number | null; d3?: number | null; d5?: number | null;
   ratio?: number | null;
-  tier: string; count_20d: number; type: string;
+  tier: string; count_7d: number; type: string;
   expanding: boolean; climax: boolean; resonance: boolean; heat?: number;
 };
 type PoolItem = {
@@ -301,7 +301,7 @@ export function LimitUpPage() {
             <FrameHeader className="flex-row items-center gap-2">
               <FrameTitle>涨停周期表</FrameTitle>
               <span className="text-[10px] text-muted-foreground">
-                单元格 = 当日该名次的主题，右上角数字 = 近 20 日涨停总数
+                单元格 = 当日该名次的主题，右上角数字 = 近 7 日涨停总数
               </span>
             </FrameHeader>
             <FramePanel className="p-0">
@@ -340,14 +340,14 @@ export function LimitUpPage() {
                               )}
                               style={cell ? heatStyle(cell.heat ?? 0, !!active) : undefined}
                               title={cell
-                                ? `${cell.name}：${cell.zt} 家涨停（近20日 ${cell.count_20d ?? cell.zt}，综合排名强度 ${Math.round((cell.heat ?? 0) * 100)}%）`
+                                ? `${cell.name}：${cell.zt} 家涨停（近7日 ${cell.count_7d ?? cell.zt}，综合排名强度 ${Math.round((cell.heat ?? 0) * 100)}%）`
                                 : ""}
                             >
                               {cell ? (
                                 <span className="flex items-center justify-center gap-0.5">
                                   <span className="truncate">{cell.name}</span>
-                                  {r === 0 && cell.count_20d ? (
-                                    <sup className="text-[9px] opacity-70">{cell.count_20d}</sup>
+                                  {r === 0 && cell.count_7d ? (
+                                    <sup className="text-[9px] opacity-70">{cell.count_7d}</sup>
                                   ) : null}
                                 </span>
                               ) : <span className="text-muted-foreground/40">—</span>}
