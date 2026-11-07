@@ -56,6 +56,8 @@ export function LlmSettings() {
   return <div className="space-y-4 text-xs">
     <div className="rounded-md bg-muted/40 px-3 py-2 leading-relaxed text-muted-foreground">
       配置和 API Key 仅保存在当前浏览器的本地存储中。行情快照由看板提供，模型请求按下方选择的方式发送。
+      <br />填写 Base URL / 模型 ID / API Key 即可，**期权决策**与**涨停复盘的涨停分析**都用这套配置
+      （涨停复盘不再依赖 opencode）。
     </div>
     <div className="space-y-1.5">
       <div className="font-medium">请求方式</div>

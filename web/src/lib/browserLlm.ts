@@ -289,3 +289,14 @@ export async function browserDecision(code: string, config: LlmConfig, signal: A
       _via: valid.transport === "proxy" ? "proxy" : "browser" }, ts: context.ts };
   });
 }
+
+/**
+ * 通用文本补全：用「大模型」设置里的同一套配置（Base URL / 模型 / API Key），
+ * 走浏览器直连或看板后端代理，**不经过 opencode**。
+ * 供涨停复盘的「涨停分析」这类纯文本场景使用。
+ */
+export async function browserChat(config: LlmConfig, system: string, user: string,
+                                  signal: AbortSignal): Promise<string> {
+  const valid = validateLlmConfig(config);
+  return withTimeout(signal, (s) => modelText(valid, system, user, s));
+}

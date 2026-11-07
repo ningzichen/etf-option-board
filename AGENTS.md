@@ -205,8 +205,13 @@ bash web/dev.sh       # 前端开发模式 :5273（/api 代理到 :6799）
   「只能归纳给出的个股原因、没有共同主线就明说」这条硬约束，否则会编宏观政策。
   缓存命中判 `theme_reasons`（payload 不含个股列表），别判 `themes`。
   个股池四个标签页**全部按当前板块过滤**，没有"全市场"页；名称列 104px + nowrap 防折行。
-  弹窗按钮在**个股池标题右侧**，`GET /api/limitup/brief?theme=` 只分析当前板块，缓存键是
-  `(theme, date, mode)`；点名板块时排除名单/等级筛选让位，炒作口径查不到就退回板块口径。
+  弹窗按钮在**个股池标题右侧**，`GET /api/limitup/brief?theme=` 只分析当前板块；
+  点名板块时排除名单/等级筛选让位，炒作口径查不到就退回板块口径。
+  **「涨停分析」不调用任何服务端大模型（2026-11-07 用户要求，不依赖 opencode）**：
+  后端 `brief()` 只拼数据 + 给规则兜底文案（`src="rule"`），真正的解读由前端
+  `browserChat()` 用「设置 → 大模型」里配的 API（Base URL / 模型 / API Key，直连或后端代理）
+  生成，按 `日期|口径|排序|板块` 缓存在 localStorage；没配置/失败就显示规则文案并引导去设置。
+  别再往 `brief()` 里加大模型调用，也别恢复 `lu_brief` 缓存表。
 - **板块资金（2026-11-04 新增，ADR-0003）**：单写路径 —— 只有 `services/board_collector.py`
   在交易时段写 `data/board_flow.db`（SQLite），`/api/board/*`、`/api/etf-flow/*`、`/api/em-flow/*`
   一律只读，**不要为了让页面有数据去实时抓东财**。采集分频：板块排行 30s（约 11 请求）、
