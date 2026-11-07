@@ -183,3 +183,16 @@ def test_rule_brief_uses_real_numbers():
     assert "33" in out["summary"]
     assert out["headline"].startswith("光伏概念")
     assert "光伏边框" in out["themes"]["光伏概念"]
+
+
+def test_clean_reason_strips_disclaimer():
+    """同花顺 reason_info 末尾的免责声明要剥掉（弹窗底部统一说一次）。"""
+    raw = ("1、公司主营光伏边框。\n\n"
+           "（免责声明：本内容由AI技术搜集公开信息总结生成，仅供参考，不构成投资建议，以上市公司公告为准）")
+    assert lu._clean_reason(raw) == "1、公司主营光伏边框。"
+    # 半角括号也要能剥
+    assert lu._clean_reason("原因(免责声明：xx)") == "原因"
+    # 正常文本与空值不动
+    assert lu._clean_reason("光伏边框+液冷铝材") == "光伏边框+液冷铝材"
+    assert lu._clean_reason(None) == ""
+    assert lu._clean_reason("") == ""

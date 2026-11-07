@@ -421,7 +421,7 @@ async def _ths_block_top(date: str) -> dict[str, dict[str, str]]:
             if not code:
                 continue
             cur = out.get(code) or {}
-            detail = (st.get("reason_info") or "").strip()
+            detail = _clean_reason(st.get("reason_info"))
             # 同一只票会出现在多个板块里，取最长的那段原因（信息最全）
             if len(detail) > len(cur.get("detail") or ""):
                 cur["detail"] = detail
@@ -806,9 +806,9 @@ async def collect(date: str, *, finalize: bool = False, with_funds: bool = True)
             "code": b["code"], "name": b["name"], "lbc": b["lbc"], "fund": b["fund"],
             "fbt": b["fbt"], "lbt": b["lbt"], "zbc": b["zbc"], "hybk": b["hybk"],
             "pct": b["pct"], "amount": b["amount"],
-            "reason": (b.get("reason") or reasons.get(b["code"])
-                       or (detail.get(b["code"]) or {}).get("type")
-                       or b["hybk"] or ""),
+            "reason": _clean_reason(b.get("reason") or reasons.get(b["code"])
+                                    or (detail.get(b["code"]) or {}).get("type")
+                                    or b["hybk"] or ""),
             "reason_detail": (detail.get(b["code"]) or {}).get("detail") or "",
             "main_net": mainnet.get(b["code"]),
             "sealed": 1, "src": b["src"],
@@ -1263,6 +1263,20 @@ def _theme_codes(date: str, board: str) -> set[str]:
 
 BRIEF_THEMES = 5          # 弹窗里展示的板块数
 BRIEF_STOCKS = 8          # 每个板块列出的个股数
+
+
+_DISCLAIMER_RE = re.compile(r"\s*[（(]\s*免责声明[：:][^）)]*[）)]\s*")
+
+
+def _clean_reason(text: str | None) -> str:
+    """去掉同花顺 reason_info 末尾那段「（免责声明：…以上市公司公告为准）」。
+
+    这段是数据源自带的，弹窗里每条个股都重复一遍很吵，统一放到页面底部小字说一次。
+    纯函数，单测覆盖。
+    """
+    if not text:
+        return ""
+    return _DISCLAIMER_RE.sub("", str(text)).strip()
 
 
 def _top_tags(reasons: list[str], n: int = 3) -> list[str]:

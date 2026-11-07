@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw, Settings2, Sparkles } from "lucide-react";
 import { Dialog } from "@/components/ui/misc";
 import { Badge } from "@/components/reui/badge";
-import { Frame, FramePanel, FrameHeader, FrameTitle } from "@/components/reui/frame";
+import { Frame, FramePanel } from "@/components/reui/frame";
 import { api } from "@/lib/api";
 import { browserChat, openLlmSettings, useLlmConfig } from "@/lib/browserLlm";
 import { pct, signedFlow } from "@/lib/format";
@@ -24,6 +24,9 @@ type Brief = {
 };
 
 const CACHE_PREFIX = "etf.limitup.brief.v2";
+/** 数据源自带的免责声明：每条个股都带一遍太吵，统一放到弹窗底部说一次 */
+const DISCLAIMER_RE = /\s*[（(]\s*免责声明[：:][^）)]*[）)]\s*/g;
+const cleanReason = (text?: string | null) => (text || "").replace(DISCLAIMER_RE, "").trim();
 const SYSTEM = "你是 A 股复盘助手，只做客观的信息归纳，不构成投资建议。严格只输出 JSON。";
 
 /** 把后端数据拼成给大模型的提示词（与本文件里的渲染字段一一对应） */
@@ -269,8 +272,9 @@ export function BriefDialog({
             {themes.map((t) => (
               <Frame key={t.board} variant="inverse" spacing="sm">
                 <FramePanel className="pb-3.5">
-                  <FrameHeader className="flex-wrap items-center gap-2">
-                    <FrameTitle className="text-base font-semibold">{t.name}</FrameTitle>
+                  {/* FrameHeader 自带 flex-col（会竖排），这里用普通行容器保证一行 */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-base font-semibold">{t.name}</span>
                     <Badge variant="primary-light" size="sm">涨停 {t.zt} 家</Badge>
                     <Badge variant={(t.pct ?? 0) >= 0 ? "destructive" : "success"} size="sm">
                       涨幅 {t.pct == null ? "-" : pct(t.pct)}
@@ -280,7 +284,7 @@ export function BriefDialog({
                         主力 {signedFlow(t.main)}
                       </Badge>
                     )}
-                  </FrameHeader>
+                  </div>
 
                   <div className="mt-2 rounded-lg bg-muted/60 px-3.5 py-2.5">
                     <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -311,7 +315,7 @@ export function BriefDialog({
                         </div>
                         <p className="mt-1.5 text-[13px] leading-6 text-slate-600">
                           <span className="font-medium text-muted-foreground">原因 </span>
-                          {s.reason_detail || s.reason || "—"}
+                          {cleanReason(s.reason_detail) || cleanReason(s.reason) || "—"}
                         </p>
                       </div>
                     ))}
@@ -320,8 +324,9 @@ export function BriefDialog({
               </Frame>
             ))}
 
-            <p className="pt-1 text-center text-[11px] text-muted-foreground">
-              {ai ? `解读由 ${ai.model} 生成` : "规则拼接文案（未使用大模型）"} · 内容仅供参考，不构成投资建议
+            <p className="border-t pt-3 text-center text-xs leading-5 text-muted-foreground">
+              {ai ? `解读由 ${ai.model} 生成` : "规则文案（未使用大模型）"}
+              ，个股涨因汇总自同花顺公开信息 · 仅供参考，不构成投资建议
             </p>
           </div>
         )}
