@@ -135,6 +135,15 @@ CREATE TABLE IF NOT EXISTS tape_flow_lots (
     PRIMARY KEY (date, time, bin)
 );
 CREATE INDEX IF NOT EXISTS idx_tape_lots_date ON tape_flow_lots(date, time);
+-- Wind 口径的板块主力净流入（逐笔 ≥70 万、剔除开盘竞价，按成分股聚合）
+CREATE TABLE IF NOT EXISTS tape_board_points (
+    date TEXT NOT NULL,
+    code TEXT NOT NULL,
+    time TEXT NOT NULL,
+    flow REAL NOT NULL,
+    PRIMARY KEY (date, code, time)
+);
+CREATE INDEX IF NOT EXISTS idx_tape_board_date ON tape_board_points(date, time);
 CREATE TABLE IF NOT EXISTS tape_flow_meta (
     date TEXT PRIMARY KEY,
     updated_at TEXT,
@@ -479,9 +488,10 @@ def prune(today: dt.date | None = None) -> dict:
     # 逐笔直方图：一天只有 1 万行，留 120 天（逐笔本身补不回来，宁可多留）
     plan["tape_flow_bins"] = prune_plan(today, tape_p, tape_p)["rank_snapshots"]
     plan["tape_flow_lots"] = list(plan["tape_flow_bins"])
+    plan["tape_board_points"] = list(plan["tape_flow_bins"])
     removed = {"flow_points": 0, "rank_snapshots": 0, "etf_flow_points": 0,
                "etf_rank_snapshots": 0, "em_flow_points": 0, "tape_flow_bins": 0,
-               "tape_flow_lots": 0, "tape_flow_meta": 0}
+               "tape_flow_lots": 0, "tape_board_points": 0, "tape_flow_meta": 0}
     with _db() as conn:
         for table, dates in plan.items():
             for d in dates:
@@ -980,6 +990,56 @@ def read_tape_bins(date: str, dim: str = "amt") -> list[tuple[str, int, float, f
             f"SELECT time, bin, buy, sell FROM {table} WHERE date=? ORDER BY time, bin",
             (date,))
         return [(str(t), int(b), float(x), float(y)) for t, b, x, y in cur.fetchall()]
+
+
+def save_tape_board(date: str, time_hm: str, flows: dict) -> int:
+    """写一轮 Wind 口径板块资金（同一 (date,code,time) 幂等 upsert）。"""
+    if not flows:
+        return 0
+    with _db() as conn:
+        conn.executemany(
+            "INSERT INTO tape_board_points(date,code,time,flow) VALUES(?,?,?,?) "
+            "ON CONFLICT(date,code,time) DO UPDATE SET flow=excluded.flow",
+            [(date, str(c), time_hm, float(v)) for c, v in flows.items()])
+    return len(flows)
+
+
+def read_tape_board_points(date: str,
+                           codes: Iterable[str] | None = None) -> dict[str, list[tuple[str, float]]]:
+    """某日各板块的 Wind 口径资金分时：{板块代码: [(HH:MM, flow)]}。"""
+    with _db() as conn:
+        if codes:
+            wanted = [c for c in codes if c]
+            if not wanted:
+                return {}
+            marks = ",".join("?" for _ in wanted)
+            cur = conn.execute(
+                f"SELECT code, time, flow FROM tape_board_points WHERE date=? AND code IN ({marks}) "
+                "ORDER BY time", (date, *wanted))
+        else:
+            cur = conn.execute(
+                "SELECT code, time, flow FROM tape_board_points WHERE date=? ORDER BY time", (date,))
+        out: dict[str, list[tuple[str, float]]] = {}
+        for code, t, v in cur.fetchall():
+            out.setdefault(str(code), []).append((str(t), float(v)))
+        return out
+
+
+def read_tape_board_latest(date: str) -> dict[str, tuple[str, float]]:
+    """某日各板块 Wind 口径资金的最新一点：{板块代码: (HH:MM, flow)}。"""
+    with _db() as conn:
+        cur = conn.execute(
+            "SELECT p.code, p.time, p.flow FROM tape_board_points p JOIN ("
+            "  SELECT code, MAX(time) AS t FROM tape_board_points WHERE date=? GROUP BY code"
+            ") m ON p.code=m.code AND p.time=m.t WHERE p.date=?", (date, date))
+        return {str(c): (str(t), float(v)) for c, t, v in cur.fetchall()}
+
+
+def tape_board_dates(limit: int = 60) -> list[str]:
+    with _db() as conn:
+        cur = conn.execute(
+            "SELECT DISTINCT date FROM tape_board_points ORDER BY date DESC LIMIT ?", (limit,))
+        return [str(r[0]) for r in cur.fetchall()]
 
 
 def read_tape_meta(date: str) -> dict:

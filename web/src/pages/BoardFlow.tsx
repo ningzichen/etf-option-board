@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Frame, FramePanel, FrameHeader, FrameTitle } from "@/components/reui/frame";
+import { Badge } from "@/components/reui/badge";
 import { EmptyState, Skeleton, Tabs } from "@/components/ui/misc";
 import { FlowListPanel } from "@/components/FlowListPanel";
 import { DayTag, isLiveDay } from "@/components/DayTag";
@@ -38,6 +39,10 @@ export function BoardFlowPage() {
   const initial = useMemo(() => readHashParams(), []);
   const initCodes = parseCodes(initial.codes);
   const [type, setType] = useState(initial.type ?? "concept");
+  /** 资金口径：east = 东财 f62（主力=超大+大）/ wind = 逐笔 ≥70 万（剔除开盘竞价） */
+  const [mode, setMode] = useState<"east" | "wind">("east");
+  // 「指数」tab 不支持 Wind（成分股接口对指数拿不到），自动回落东财
+  const effMode = type === "index" ? "east" : mode;
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("flow");
   const [sortDir, setSortDir] = useState(-1);
@@ -70,10 +75,11 @@ export function BoardFlowPage() {
   // 直接拿 rankView.date 回填「今日」的落点，会把日期弹回上一次的历史日期，
   // 请求还没来得及发就被改回历史 → 点「今日」看起来毫无反应。
   const { data: rankView, refresh: refreshRank } = usePolling(
-    () => api.boardRank("all", date || undefined).then((d) => ({ ...d, _asked: date })),
+    () => api.boardRank("all", date || undefined, effMode).then((d) => ({ ...d, _asked: date })),
     interval,
-    [interval, date],
-    { kind: "brank", code: `all:${date || "latest"}` },
+    [interval, date, effMode],
+    // 口径进了缓存键：否则切到 Wind 时 IndexedDB 会先喂回东财的旧数据
+    { kind: "brank", code: `all:${effMode}:${date || "latest"}` },
   );
   const { data: indexView, refresh: refreshIndex } = usePolling(
     () => api.boardIndexRank(date || undefined),
@@ -268,7 +274,7 @@ export function BoardFlowPage() {
   const sortedBase = () => [...baseRows].sort((a, b) => b.flow - a.flow);
 
   // 分时缓存键带日期：切日期必须重新拉（旧日期数据不能复用）
-  const keyOf = useCallback((code: string) => `${date}|${code}`, [date]);
+  const keyOf = useCallback((code: string) => `${date}|${effMode}|${code}`, [date, effMode]);
 
   // 分时数据：按缺失/过期分块拉取（最多 60 个一批），命中缓存直接渲染
   useEffect(() => {
@@ -285,7 +291,8 @@ export function BoardFlowPage() {
         const chunk = missing.slice(i, i + 60);
         chunk.forEach((c) => inflight.current.add(keyOf(c)));
         try {
-          const d = await api.boardSeries(chunk.join(","), date || undefined, type === "index" ? "index" : "concept");
+          const d = await api.boardSeries(chunk.join(","), date || undefined,
+            type === "index" ? "index" : "concept", effMode);
           const byCode = new Map((d?.series ?? []).map((s: any) => [s.code, s]));
           chunk.forEach((c) => {
             const s: any = byCode.get(c);
@@ -319,7 +326,8 @@ export function BoardFlowPage() {
       return;
     }
     try {
-      const d = await api.boardSeries(b.code, date || undefined, type === "index" ? "index" : "concept");
+      const d = await api.boardSeries(b.code, date || undefined,
+        type === "index" ? "index" : "concept", effMode);
       const s: any = (d?.series ?? [])[0];
       if (!s) return;
       const pts: [string, number][] = [];
@@ -337,7 +345,7 @@ export function BoardFlowPage() {
     void cacheVer;
     return selectedCodes
       .map((code) => {
-        const e = cache.current[`${date}|${code}`];
+        const e = cache.current[`${date}|${effMode}|${code}`];
         if (!e || !e.points.length) return null;
         const row = rows.find((r) => r.code === code);
         return { code, name: e.name || row?.name || code, points: e.points, pct: row?.pct ?? e.pct };
@@ -447,7 +455,21 @@ export function BoardFlowPage() {
             <div className="flex items-center gap-2">
               <FrameTitle className="text-sm">主力资金分时</FrameTitle>
               <Tabs tabs={TYPES} value={type} onChange={(k) => { setType(k); setSearch(""); }} />
+              <span className="mx-0.5 h-3.5 w-px bg-border" aria-hidden />
+              <Tabs
+                tabs={[{ key: "east", label: "东财口径" }, { key: "wind", label: "Wind 口径" }]}
+                value={mode}
+                onChange={(k) => setMode(k as "east" | "wind")}
+              />
               <DayTag date={date} latest={latestDay} />
+              {mode === "wind" && type === "index" ? (
+                <Badge variant="warning-light">指数暂不支持 Wind</Badge>
+              ) : null}
+              {rankView?.fallback === "no_wind" && mode === "wind" ? (
+                <Badge variant="warning-light" title="该日没有 Wind 口径的逐笔数据（自 2026-11-07 起采集）">
+                  无 Wind 数据，已用东财
+                </Badge>
+              ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
               <select

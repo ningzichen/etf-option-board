@@ -30,6 +30,7 @@ import logging
 import time
 from typing import Iterable
 
+from services import board_map
 from services import boardflow as bf
 from services import em
 
@@ -73,6 +74,8 @@ PRESETS: dict[str, dict] = {
     },
 }
 
+# 「Wind 主力净流入」= Wind 的「机构 + 主力」两档合并 = 单笔 ≥70 万（与资金流向页同口径）
+WIND_MAIN_MIN = 70.0     # 万元
 SESSION = (("09:30", "11:30"), ("13:00", "15:00"))
 SCAN_INTERVAL = 600.0      # 盘中每 10 分钟重算一次（一次约 100~140 秒）
 FINAL_HM = "15:05"         # 收盘后再跑一次定稿
@@ -237,6 +240,16 @@ def cumulative(rows: Iterable[tuple[str, int, float, float]],
     return out
 
 
+def wind_main_tick(amount: float, side: int, auction: bool) -> float:
+    """单笔成交对「Wind 主力（机构 + 主力 = ≥70 万）」的净额贡献。
+
+    集合竞价（开盘）不计；不足 70 万不计；返回 +金额（主动买）/−金额（主动卖）。
+    """
+    if auction or not amount or amount < WIND_MAIN_MIN * 1e4:
+        return 0.0
+    return float(amount) if side > 0 else -float(amount)
+
+
 def align_price(axis: Iterable[str], points: Iterable[dict], date: str) -> list[float | None]:
     """把分时价格点对齐到资金轴（HH:MM）：只取当日、缺分钟用前值填充。
 
@@ -300,6 +313,7 @@ async def scan() -> dict:
 
     amt: dict[tuple[str, int], list[float]] = {}
     lot: dict[tuple[str, int], list[float]] = {}
+    stocks: dict[str, float] = {}     # 每只股票的 Wind「机构+主力」当日累计净额
     ok = 0
     sem = asyncio.Semaphore(CONCURRENCY)
 
@@ -326,6 +340,11 @@ async def scan() -> dict:
                 side_lot = 1 if (auction or side > 0) else -1
                 slot2 = lot.setdefault((minute, bin_of(lots, LOTS)), [0.0, 0.0])
                 slot2[0 if side_lot > 0 else 1] += amount
+                # 按股：Wind 主力（机构+主力 = ≥70 万、剔除开盘竞价）
+                delta = wind_main_tick(amount, side, auction)
+                if delta:
+                    code = secid.split(".", 1)[-1]
+                    stocks[code] = stocks.get(code, 0.0) + delta
 
     await asyncio.gather(*(one(s) for s in items))
 
@@ -334,7 +353,7 @@ async def scan() -> dict:
 
     # 成交额口径用「手数档」那张（含全部竞价），金额档那张刻意剔了开盘竞价，不能拿来校验
     amount = sum(v[0] + v[1] for v in lot.values())
-    return {"amt": flat(amt), "lot": flat(lot), "amount": amount,
+    return {"amt": flat(amt), "lot": flat(lot), "amount": amount, "stocks": stocks,
             "stocks_ok": ok, "stocks_total": total}
 
 
@@ -380,16 +399,27 @@ async def run_scan(force: bool = False) -> dict:
             bf.save_tape_day, date, got["amt"], got["lot"],
             {"updated_at": dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
              "stocks_total": total, "stocks_ok": ok, "amount": ours})
+
+        # Wind 口径的板块资金：把「每只股票 ≥70 万净额」按板块成分股求和
+        boards = 0
+        try:
+            mapping = await board_map.build()
+            flows = board_map.aggregate(got["stocks"], mapping)
+            boards = await asyncio.to_thread(
+                bf.save_tape_board, date, dt.datetime.now().strftime("%H:%M"), flows)
+        except Exception as exc:  # noqa: BLE001 — 板块维度失败不影响全A口径
+            log.warning("Wind 板块聚合失败: %s", exc)
         _state.update({"cycles": _state.get("cycles", 0) + 1,
                        "last_run": dt.datetime.now().isoformat(timespec="seconds"),
                        "last_date": date, "stocks_ok": ok, "stocks_total": total,
                        "last_error": None})
         _last_scan_mono = time.monotonic()
-        log.info("全A逐笔入库 %s：%d 只 / 金额档 %d 行 / 手数档 %d 行 / %.0f 亿 / %.0fs",
-                 date, ok, len(got["amt"]), len(got["lot"]), ours / 1e8, time.time() - t0)
+        log.info("全A逐笔入库 %s：%d 只 / 金额档 %d 行 / 手数档 %d 行 / 板块 %d 个 / %.0f 亿 / %.0fs",
+                 date, ok, len(got["amt"]), len(got["lot"]), boards, ours / 1e8,
+                 time.time() - t0)
         return {"ok": True, "date": date, "rows": len(got["amt"]) + len(got["lot"]),
                 "amount": ours, "stocks_ok": ok, "stocks_total": total,
-                "seconds": round(time.time() - t0, 1)}
+                "boards": boards, "seconds": round(time.time() - t0, 1)}
     except Exception as exc:  # noqa: BLE001
         _state["last_error"] = str(exc)
         log.warning("全A逐笔失败：%s", exc)

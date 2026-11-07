@@ -676,7 +676,8 @@ async def board_health():
 @router.get("/board/rank")
 async def board_rank(type: str = Query("concept",
                                        description="concept / industry / watch"),
-                     date: str | None = Query(None, description="YYYY-MM-DD，缺省为最近一个有数据的交易日")):
+                     date: str | None = Query(None, description="YYYY-MM-DD，缺省为最近一个有数据的交易日"),
+                     mode: str = Query("east", description="east（东财 f62）/ wind（逐笔 ≥70 万）")):
     """板块资金排行（只读本地库，不会触发任何上游请求）。
 
     库为空时返回 `items=[]` 与 `error` 提示，前端显示空态而不是 500。
@@ -703,6 +704,34 @@ async def board_rank(type: str = Query("concept",
     except Exception as exc:  # noqa: BLE001 — 库损坏/未初始化一律降级
         return {"date": date, "type": btype, "items": [], "error": f"板块库读取失败: {exc}"}
 
+    flow_src = "east"
+    wind_time = None
+    fallback = None
+    if mode == "wind":
+        try:
+            wind = await asyncio.to_thread(bf.read_tape_board_latest, date)
+        except Exception:  # noqa: BLE001
+            wind = {}
+        if wind:
+            flow_src = "wind"
+            for r in rows:
+                hit = wind.get(r["code"])
+                if hit:
+                    wind_time = wind_time or hit[0]
+                    r["flow"] = hit[1]
+                    r["flow_src"] = "wind"
+                else:
+                    r["flow_src"] = "east"      # 指数 / 未覆盖的板块仍用东财
+            # 口径变了名次必须重算；上一轮名次是东财口径的，不做「名次变化」
+            for t in ("concept", "industry"):
+                part = [r for r in rows if r.get("type") == t]
+                part.sort(key=lambda x: (-float(x.get("flow") or 0), str(x.get("code"))))
+                for i, r in enumerate(part, start=1):
+                    r["rank"] = i
+                    r["prev_rank"] = None
+        else:
+            fallback = "no_wind"
+
     for r in rows:
         r["watch"] = r["code"] in watch_codes
         r["py"] = pinyin_svc.initials(r.get("name") or "")
@@ -714,7 +743,9 @@ async def board_rank(type: str = Query("concept",
     today = dt.date.today().isoformat()
     out = {"date": date, "type": btype, "items": rows, "is_today": date == today,
            "trading": bf.in_session(dt.datetime.now()),
-           "watch_count": len(watch_codes)}
+           "watch_count": len(watch_codes),
+           "mode": "wind" if flow_src == "wind" else "east",
+           "flow_src": flow_src, "wind_time": wind_time, "fallback": fallback}
     if not rows:
         out["error"] = ("还没有自选板块，点列表右侧星标即可加入"
                         if want_watch and not watch_codes
@@ -788,7 +819,8 @@ async def board_watch_remove(code: str = Query(...)):
 @router.get("/board/series")
 async def board_series(codes: str = Query("", description="逗号分隔的板块代码，缺省取当前口径前 8"),
                        date: str | None = Query(None),
-                       type: str = Query("concept", description="codes 缺省时按此口径取前 8")):
+                       type: str = Query("concept", description="codes 缺省时按此口径取前 8"),
+                       mode: str = Query("east", description="east / wind")):
     """板块当日资金分时（多线，已按统一时间轴对齐）。只读本地库。"""
     if not date:
         try:
@@ -815,7 +847,20 @@ async def board_series(codes: str = Query("", description="逗号分隔的板块
     try:
         bk_codes = [c for c in wanted if c.startswith("BK")]
         idx_codes = [c for c in wanted if not c.startswith("BK")]
-        points = await asyncio.to_thread(bf.read_points, date, bk_codes) if bk_codes else {}
+        if mode == "wind":
+            points = await asyncio.to_thread(bf.read_tape_board_points, date, bk_codes) \
+                if bk_codes else {}
+            points = {c: v for c, v in points.items() if v}
+            flow_src = "wind" if points else "east"
+            if flow_src == "east":       # 该日没有 Wind 数据：回落东财
+                points = await asyncio.to_thread(bf.read_points, date, bk_codes) \
+                    if bk_codes else {}
+                fallback = "no_wind"
+            else:
+                fallback = None
+        else:
+            points = await asyncio.to_thread(bf.read_points, date, bk_codes) if bk_codes else {}
+            flow_src, fallback = "east", None
         # 指数 / 全 A：库里只有 4 维点，主力口径用「机构 + 大单」合成
         for code in idx_codes:
             pts = await asyncio.to_thread(bf.read_em_points, date, code)
@@ -833,7 +878,8 @@ async def board_series(codes: str = Query("", description="逗号分隔的板块
         s["final_flow"] = s.get("last")
     points_n = sum(len(v) for v in points.values())
     out = {"date": date, "axis": aligned["axis"], "series": aligned["series"],
-           "codes": wanted, "points": points_n}
+           "codes": wanted, "points": points_n,
+           "mode": flow_src, "flow_src": flow_src, "fallback": fallback}
     if points_n < 2:
         out["error"] = "当日分时点不足（服务启动后从下一分钟开始累积）"
     return out
