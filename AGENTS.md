@@ -222,6 +222,11 @@ bash web/dev.sh       # 前端开发模式 :5273（/api 代理到 :6799）
   `browserChat()` 用「设置 → 大模型」里配的 API（Base URL / 模型 / API Key，直连或后端代理）
   生成，按 `日期|口径|排序|板块` 缓存在 localStorage；没配置/失败就显示规则文案并引导去设置。
   别再往 `brief()` 里加大模型调用，也别恢复 `lu_brief` 缓存表。
+  **角标口径**：周期表右上角数字 = **近 7 个交易日**涨停总数（`BADGE_DAYS=7`，字段 `count_7d`）；
+  扩张/高潮/三共振的判定窗口**没变**（高潮仍是近 20 日新高），别把两者混成一个窗口。
+  **弹窗排版**：980px 宽，关键信息一律用 ReUI `Badge`（板块名/涨停数/涨幅/连板/模型名），
+  板块块用 `Frame variant="inverse"`，个股是两列卡片（正文 13px/行高 24px），
+  不要退回密集 `<table>` —— 长文原因在表格里读不动。
   **筛选勾选项的说明用本地 `Hint` 组件**（`LimitUp.tsx`，CSS `group-hover` + `group-focus-within`
   双触发），不是原生 `title` —— 原生 tooltip 有 1 秒延迟且样式不可控，别再退回 title。
 - **板块资金（2026-11-04 新增，ADR-0003）**：单写路径 —— 只有 `services/board_collector.py`
