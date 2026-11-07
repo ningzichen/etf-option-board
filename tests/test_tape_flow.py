@@ -123,3 +123,12 @@ def test_align_price_filters_date_and_carries_forward():
     ]
     assert tf.align_price(axis, pts, "2026-11-06") == [None, 10.5, 10.5, 11.0]
     assert tf.align_price([], pts, "2026-11-06") == []
+
+
+def test_wind_main_tick_thresholds():
+    # ≥70 万才计入；集合竞价整段不计
+    assert tf.wind_main_tick(699_999, 1, False) == 0.0
+    assert tf.wind_main_tick(700_000, 1, False) == 700_000.0
+    assert tf.wind_main_tick(4_000_000, -1, False) == -4_000_000.0
+    assert tf.wind_main_tick(10_000_000, 1, True) == 0.0      # 竞价剔除
+    assert tf.wind_main_tick(0, 1, False) == 0.0

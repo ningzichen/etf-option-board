@@ -74,12 +74,12 @@ export const api = {
 
   // 板块资金（读本地库，采集由后端定时进行）
   boardHealth: () => get("/board/health"),
-  boardRank: (type = "concept", date?: string) =>
-    get(`/board/rank?type=${type}${date ? `&date=${date}` : ""}`),
+  boardRank: (type = "concept", date?: string, mode = "east") =>
+    get(`/board/rank?type=${type}&mode=${mode}${date ? `&date=${date}` : ""}`),
   boardIndexRank: (date?: string) =>
     get(`/board/index-rank${date ? `?date=${date}` : ""}`),
-  boardSeries: (codes: string, date?: string, type = "concept") =>
-    get(`/board/series?codes=${encodeURIComponent(codes)}&type=${type}${date ? `&date=${date}` : ""}`),
+  boardSeries: (codes: string, date?: string, type = "concept", mode = "east") =>
+    get(`/board/series?codes=${encodeURIComponent(codes)}&type=${type}&mode=${mode}${date ? `&date=${date}` : ""}`),
   boardDates: (limit = 60) => get(`/board/dates?limit=${limit}`),
   /** 财联社「热门板块」：热门行业/概念 + 盘面异动，模糊匹配到本地板块。
    *  force=true 跳过后端 5 分钟缓存，直接回源财联社（页面刷新按钮用）。 */

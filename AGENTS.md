@@ -121,6 +121,16 @@ bash web/dev.sh       # 前端开发模式 :5273（/api 代理到 :6799）
   不要挪回图区，否则会压低图高）。
   口径差异与取舍见 `docs/adr/0005-资金流向全A逐笔分档直方图.md`——**东财四档净额合计恒为 0，
   与这套「主动净额」不可对账**，别把两边的数字放在一起比。
+- **板块级 Wind 口径（2026-11-07，`feat/wind-board-flow`）**：`/api/board/rank|series` 支持
+  `mode=wind`——「主力」= Wind 的**机构 + 主力 = 单笔 ≥70 万、剔除开盘竞价**（与资金流向页同一套），
+  逐笔扫描时按股累计（`wind_main_tick`）→ 按板块成分股求和 → `tape_board_points(date, code, time, flow)`
+  （一天约 1000 板块 × 24 轮 ≈ 2.5 万行，留 120 天）。
+  **成分股映射**在 `services/board_map.py`：`clist fs=b:BKxxxx` 逐板块拉（概念 531 + 行业 496，
+  约 1~3 分钟），**日级缓存**到 `data/tape_board_map.json`，不能跟 10 分钟扫描重建。
+  **只存板块结果不存每股**：换门槛/映射后历史不可重算（逐笔本就补不回来），这是有意的取舍。
+  **不支持「指数」tab**（成分股接口对指数返回空）→ 前端自动回落东财并打「指数暂不支持 Wind」；
+  历史日期没有 Wind 数据时后端返回 `fallback: "no_wind"`，前端角标「无 Wind 数据，已用东财」。
+  口径切换后名次按 Wind 资金重算、`prev_rank` 置空（不做跨口径的名次变化）。
 - **汪汪队 ETF 跟踪器（2026-11-07 新增一级导航，`#/wangwang`）**：复刻外部的
   「今日国家队上班了吗」页面，判断 24 只宽基 ETF（20 只汇金历史持仓 + 4 只扩展观察）
   今天的成交额放大倍数 + 主动净买入是否像护盘。**完全自包含**：`services/wangwang.py`
@@ -212,6 +222,8 @@ bash web/dev.sh       # 前端开发模式 :5273（/api 代理到 :6799）
   `browserChat()` 用「设置 → 大模型」里配的 API（Base URL / 模型 / API Key，直连或后端代理）
   生成，按 `日期|口径|排序|板块` 缓存在 localStorage；没配置/失败就显示规则文案并引导去设置。
   别再往 `brief()` 里加大模型调用，也别恢复 `lu_brief` 缓存表。
+  **筛选勾选项的说明用本地 `Hint` 组件**（`LimitUp.tsx`，CSS `group-hover` + `group-focus-within`
+  双触发），不是原生 `title` —— 原生 tooltip 有 1 秒延迟且样式不可控，别再退回 title。
 - **板块资金（2026-11-04 新增，ADR-0003）**：单写路径 —— 只有 `services/board_collector.py`
   在交易时段写 `data/board_flow.db`（SQLite），`/api/board/*`、`/api/etf-flow/*`、`/api/em-flow/*`
   一律只读，**不要为了让页面有数据去实时抓东财**。采集分频：板块排行 30s（约 11 请求）、
