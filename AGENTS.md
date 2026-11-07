@@ -359,12 +359,17 @@ Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/do
 ## 协作约定（记忆）
 
 - **对话语言：中文。** 本仓库相关的回复、工单、注释一律用中文。
+- **GitHub 只在你发话时动（2026-11-07 用户明确要求，优先级最高）**：
+  **禁止自动 `git push`、禁止自动 `gh pr create` / `gh pr merge`**。改完代码只做**本地** commit
+  （按全局规则照常 auto-backup），推送与开 PR/合并一律等用户明确说"推上去 / 发 PR"再执行。
+  这条**覆盖**下面第 2 条的自动 PR 流程。
 - **新特性走分支 + PR（2026-11-07 起）**：开发新功能/较大改动**不要直接改 `master`**，先开分支
-  （建议 `feat/<主题>`、`fix/<主题>`、`perf/<主题>`），完成后 **提 Pull Request 合并回 `master`**。
-  流程：`git switch -c feat/xxx` → 开发（改前端记得 `bash web/build.sh`）→
-  `/Users/xinxin/.browser-use-env/bin/python3 -m pytest -q` 全绿 →
-  `git push -u origin feat/xxx` → `gh pr create`（写清动机/改动/验证）→ 审查或自测通过后
-  `gh pr merge --squash`。只有紧急修复、改文档/错字这类极小改动才允许直接提交主干。
+  （建议 `feat/<主题>`、`fix/<主题>`、`perf/<主题>`），在分支上本地提交。
+  **推送与提 PR 要等用户发话**（见上一条）；用户点头后再
+  `git push -u origin feat/xxx` → `gh pr create`（写清动机/改动/验证）→ `gh pr merge --squash`。
+  流程里的自测照旧：改前端记得 `bash web/build.sh`、
+  `/Users/xinxin/.browser-use-env/bin/python3 -m pytest -q` 全绿。
+  只有紧急修复、改文档/错字这类极小改动才允许直接提交主干。
   仓库已迁到组织 `NIO-SAI/etf-option-board`（个人账号仓库不支持 Admin 角色）。
 - **项目定位一览**（供新会话快速上手，不必重复调研）：
   - 是什么：6 只可交易期权宽基 ETF 的日内决策看板 —— 聚合行情/期权链/资金流/指数/外围
