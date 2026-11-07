@@ -71,7 +71,7 @@ function selectedStyle(zt: number, maxZt: number) {
 export function LimitUpPage() {
   const [date] = useState("");
   const [theme, setTheme] = useState("");
-  const [days, setDays] = useState(11);
+  const [days, setDays] = useState(10);
   /** 主题等级：all / primary（一级主题）/ secondary（二级主题），按板块成分股数分档 */
   const [level, setLevel] = useState("all");
   /** 排序口径：hot=按炒作涨停 / board=按板块涨停 / pct=按涨幅 */
@@ -221,9 +221,8 @@ export function LimitUpPage() {
             onChange={(e) => setDays(Number(e.target.value))}
             className="h-7 rounded border bg-background px-2 text-xs"
           >
-            <option value={6}>近 6 日</option>
-            <option value={11}>近 11 日</option>
-            <option value={16}>近 16 日</option>
+            <option value={5}>近 5 日</option>
+            <option value={10}>近 10 日</option>
             <option value={20}>近 20 日</option>
             <option value={30}>近 30 日</option>
           </select>
