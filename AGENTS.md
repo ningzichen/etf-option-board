@@ -229,7 +229,12 @@ bash web/dev.sh       # 前端开发模式 :5273（/api 代理到 :6799）
   显示数换成板块口径，`build_matrix` 靠 `rank` 保持排序口径的顺序。**棱镜图（`prism`）的主题线、
   「涨停分析」弹窗（`brief`）也必须用 `base_mode` 读** —— 只改 overview 会剩这两处仍显示炒作口径
   （3 vs 5，2026-11-07 二次反馈）。周期表另有版面约定：当前日期列红框、选中主题红底按家数分深浅、
-  顶部「期间热门」条取 `overview.period_top`、右上角**没有**日期下拉（窗口固定最新交易日）。个股池「炒作涨停」tab
+  顶部「期间热门」条取 `overview.period_top`、右上角**没有**日期下拉（窗口固定最新交易日）。
+  **红框必须用绝对定位的覆盖层**（`border-2 border-rose-500` + `pointer-events-none`，坐标取表头
+  `offsetLeft/offsetWidth`、高度取 `table.offsetHeight`），**不要给每个格子加 `border-x`** ——
+  逐格边框会跟行分隔线在同一网格里拼出内横线；红框跟随 `focusDate`（点过的那一列），不是 `curDate`。
+  排名列要 `w-16 min-w-[64px] whitespace-nowrap`（`table-auto` 下光写 `w-12` 会被内容压到 31px、标题换行）。
+  这套排版有回归脚本：`ego-browser nodejs < scripts/check_limitup_ui.js`（全绿才退出 0）。个股池「炒作涨停」tab
   **不再按主概念过滤**（只改排序）——试过过滤，切标签页后家数又对不上。别再让"家数"随排序/标签变化。
   **弹窗排版**：980px 宽，关键信息一律用 ReUI `Badge`（板块名/涨停数/涨幅/连板/模型名），
   板块块用 `Frame variant="inverse"`，个股是两列卡片（正文 13px/行高 24px），
