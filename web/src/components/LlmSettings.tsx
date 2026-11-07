@@ -8,6 +8,31 @@ import {
 
 const INPUT = "h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
+/**
+ * 快速填入的预设。API Key 一律留空由用户自己粘。
+ *
+ * - zen 免费模型：**必须走看板后端代理**（它不给浏览器 CORS），且请求要带
+ *   `x-opencode-session`（代码按域名自动补）；额度用尽返回 429，次日 08:00 恢复。
+ * - DeepSeek 官方：实测允许浏览器跨域（OPTIONS 会回显 `access-control-allow-origin`），
+ *   所以默认**直连**，Key 连看板后端都不经过。
+ */
+const PRESETS = [
+  {
+    label: "opencode zen 免费模型",
+    patch: { protocol: "openai" as const, transport: "proxy" as const,
+      baseUrl: "https://opencode.ai/zen/v1", model: "deepseek-v4.1-flash-free" },
+    hint: "免费用量每天 08:00（北京时间）恢复；Key 取 ~/.local/share/opencode/auth.json 的 opencode-go。"
+      + "额度用尽会 429，此时涨停分析退回规则文案。",
+  },
+  {
+    label: "DeepSeek 官方",
+    patch: { protocol: "openai" as const, transport: "direct" as const,
+      baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" },
+    hint: "platform.deepseek.com 申请 Key；直连（服务端已允许跨域），Key 不经过看板后端。"
+      + "要更强推理可把模型 ID 换成 deepseek-reasoner（更慢、更贵）。",
+  },
+] as const;
+
 export function LlmSettings() {
   const [config, setConfig] = useState<LlmConfig>(() => loadLlmConfig() || { ...EMPTY_LLM_CONFIG });
   const [busy, setBusy] = useState(false);
@@ -53,18 +78,11 @@ export function LlmSettings() {
     }
   };
 
-  /** 一键填入 opencode zen 的免费模型（API Key 由用户自己粘） */
-  const useZenFree = () => {
+  /** 一键填入某个厂商的参数（API Key 一律由用户自己粘） */
+  const usePreset = (preset: (typeof PRESETS)[number]) => {
     setStatus(""); setError("");
-    setConfig((old) => ({
-      ...old,
-      protocol: "openai",
-      transport: "proxy",                 // 走看板后端代理，绕开 zen 的跨域限制
-      baseUrl: "https://opencode.ai/zen/v1",
-      model: "deepseek-v4.1-flash-free",
-      maxTokens: defaultMaxTokens("openai"),
-    }));
-    setStatus("已填入 opencode zen 免费模型参数，粘贴 API Key 后点「保存模型配置」");
+    setConfig((old) => ({ ...old, ...preset.patch, maxTokens: defaultMaxTokens("openai") }));
+    setStatus(`已填入${preset.label}参数，粘贴 API Key 后点「保存模型配置」`);
   };
 
   return <div className="space-y-4 text-xs">
@@ -76,12 +94,16 @@ export function LlmSettings() {
     <div className="space-y-1.5">
       <div className="font-medium">快速填入</div>
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="outline" onClick={useZenFree}>opencode zen 免费模型</Button>
+        {PRESETS.map((p) => (
+          <Button key={p.label} size="sm" variant="outline" onClick={() => usePreset(p)}>
+            {p.label}
+          </Button>
+        ))}
       </div>
-      <div className="leading-relaxed text-muted-foreground">
-        免费模型在额度内可用（每天 08:00 北京时间恢复）。API Key 用 opencode 的 key
-        （`~/.local/share/opencode/auth.json` 里 `opencode-go` 那条），或登录 opencode.ai 自助获取。
-        免费额度用尽时会返回 429，此时「涨停复盘」会退回规则文案。
+      <div className="space-y-1 leading-relaxed text-muted-foreground">
+        {PRESETS.map((p) => (
+          <div key={p.label}><b className="text-foreground">{p.label}</b>：{p.hint}</div>
+        ))}
       </div>
     </div>
     <div className="space-y-1.5">
