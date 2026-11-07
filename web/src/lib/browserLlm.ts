@@ -10,6 +10,8 @@ export interface LlmConfig {
   model: string;
   apiKey: string;
   maxTokens: number;
+  /** DeepSeek 官方模型：off = 关闭思考模式（归纳类任务更快更省）；不填/undefined = 厂商默认 */
+  thinking?: "default" | "off";
 }
 
 const STORAGE_KEY = "etf-board.llm-config.v1";
@@ -96,6 +98,12 @@ export function openLlmSettings(): void {
 interface ModelRequest { url: string; headers: Record<string, string>; body: string }
 interface ModelReply { status?: number; text?: string; error?: string }
 
+/** 是否该给这个地址加 DeepSeek 的 thinking 参数（其它厂商不认这个字段，别乱发） */
+function isDeepSeek(config: LlmConfig): boolean {
+  try { return new URL(llmEndpoint(config)).hostname.endsWith("deepseek.com"); }
+  catch { return false; }
+}
+
 function modelRequest(config: LlmConfig, system: string, user: string): ModelRequest {
   const headers: Record<string, string> = { "Content-Type": "application/json", Accept: "application/json" };
   // 推理模型的 max_tokens 同时包含推理与最终正文，不能只按最终 JSON 的长度预算。
@@ -109,6 +117,10 @@ function modelRequest(config: LlmConfig, system: string, user: string): ModelReq
   } else {
     if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
     body.messages = [{ role: "system", content: system }, { role: "user", content: user }];
+    // DeepSeek 官方：思考模式默认开启（effort=high），归纳/摘要类任务显式关掉更快更省
+    if (config.thinking === "off" && isDeepSeek(config)) {
+      body.thinking = { type: "disabled" };
+    }
   }
   // opencode zen 的免费模型必须带会话标识，否则会被拦（"Free models work in OpenCode"）。
   try {
@@ -176,6 +188,7 @@ async function modelText(config: LlmConfig, system: string, user: string, signal
     reply = config.transport === "proxy" ? await api.llmProxy({
       protocol: config.protocol, baseUrl: config.baseUrl, model: config.model, apiKey: config.apiKey,
       system, user, test, maxTokens: config.maxTokens,
+      thinkingOff: config.thinking === "off" && isDeepSeek(config),
     }, signal) : await sendFromBrowser(modelRequest(config, system, user), signal);
   }
   catch (e) {

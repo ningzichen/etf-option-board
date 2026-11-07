@@ -44,6 +44,8 @@ export const api = {
   llmProxy: async (body: {
     protocol: string; baseUrl: string; model: string; apiKey: string;
     system: string; user: string; test: boolean; maxTokens: number;
+    /** DeepSeek 官方：true = 关闭思考模式（后端只对 deepseek.com 生效） */
+    thinkingOff?: boolean;
   }, signal: AbortSignal) => {
     const r = await fetch(`${BASE}/llm/proxy`, {
       method: "POST", signal, cache: "no-store", credentials: "omit",
