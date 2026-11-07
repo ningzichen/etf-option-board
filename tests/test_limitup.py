@@ -196,3 +196,37 @@ def test_clean_reason_strips_disclaimer():
     assert lu._clean_reason("光伏边框+液冷铝材") == "光伏边框+液冷铝材"
     assert lu._clean_reason(None) == ""
     assert lu._clean_reason("") == ""
+
+
+def test_zt_and_ext_row_rules():
+    """默认口径 = 封板 ∪ [9.90,10.29]；扩充口径 = 封板 ∪ >9.9。"""
+    # 封板一律算（20cm 涨停也保住）
+    assert lu.is_zt_row(1, 20.0) and lu.is_ext_row(1, 20.0)
+    assert lu.is_zt_row(1, None) and lu.is_ext_row(1, None)
+    # 区间边界：9.90 与 10.29 都算，10.30 不算
+    assert lu.is_zt_row(0, 9.90) and lu.is_zt_row(0, 10.29)
+    assert not lu.is_zt_row(0, 10.30)
+    assert not lu.is_zt_row(0, 9.89)
+    # 扩充口径只要 >9.9
+    assert lu.is_ext_row(0, 9.91) and lu.is_ext_row(0, 20.0)
+    assert not lu.is_ext_row(0, 9.90)      # 边界是严格大于
+    # 未封板的 20cm 涨幅 15%：默认口径不算，扩充算
+    assert not lu.is_zt_row(0, 15.0) and lu.is_ext_row(0, 15.0)
+    # 脏数据不炸
+    assert not lu.is_zt_row(0, None) and not lu.is_zt_row(0, "abc")
+
+
+def test_display_count_uses_board_scope():
+    """主题榜「涨停」数一律用**板块口径**，与个股池列出的家数一致。
+
+    排序口径（炒作/涨幅）只决定顺序，不能决定这个数字——否则主题榜说 3 家、
+    个股池列出 5 只，用户会以为数据错乱（2026-11-07 实际反馈）。
+    """
+    rows = [{"board": "BK1", "zt": 3}, {"board": "BK2", "zt": 1}]
+    out = lu.apply_board_counts(rows, {"BK1": 5, "BK2": 1})
+    assert [r["zt"] for r in out] == [5, 1]
+    # 顺序保持不变（排序口径决定顺序）
+    assert [r["board"] for r in out] == ["BK1", "BK2"]
+    # 缺板块口径时回退原值
+    assert lu.apply_board_counts([{"board": "BK9", "zt": 2}], {})[0]["zt"] == 2
+    assert lu.apply_board_counts([], {"BK1": 5}) == []

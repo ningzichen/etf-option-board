@@ -74,6 +74,10 @@ CONCEPT_RANK_LIMIT = 8      # 每只涨停股最多取排名前 N 个概念（�
 PRISM_DAYS = 25
 BADGE_DAYS = 7              # 周期表右上角角标的统计窗口（近 N 个交易日涨停总数）
 EXT_PCT = 9.9               # 「扩充涨停」的涨幅门槛（> 9.9% 即算涨停）
+# 默认「涨停」口径：东财涨停池（封板）∪ 收盘涨幅落在 [9.90%, 10.29%] 的个股。
+# 10.29 是主板 10% 涨停因股价四舍五入能出现的上界（1.01→1.11 是 9.90%，2.05→2.26 是 10.24%）。
+ZT_PCT_MIN = 9.90
+ZT_PCT_MAX = 10.29
 MODES = ("zt", "ext")       # zt = 东财涨停池；ext = 涨停池 ∪ 涨幅>9.9%
 
 # ---- 概念噪音黑名单 -----------------------------------------------------------
@@ -199,9 +203,13 @@ def build_matrix(per_day: list[dict[str, Any]], top: int = 10) -> list[list[dict
     """
     cols: list[list[dict[str, Any] | None]] = []
     for day in per_day:
-        ranked = sorted(day.get("themes") or [],
-                        key=lambda t: (-int(t.get("zt") or 0), -int(t.get("max_lbc") or 0),
-                                       t.get("name") or ""))
+        items = day.get("themes") or []
+        if items and all(t.get("rank") is not None for t in items):
+            ranked = sorted(items, key=lambda t: int(t["rank"]))   # 已按排序口径排好
+        else:
+            ranked = sorted(items,
+                            key=lambda t: (-int(t.get("zt") or 0), -int(t.get("max_lbc") or 0),
+                                           t.get("name") or ""))
         col = [dict(t) for t in ranked[:top]]
         col += [None] * (top - len(col))
         cols.append(col)
@@ -451,6 +459,33 @@ async def _stock_main_net(codes: list[str]) -> dict[str, float]:
             if code and v is not None:
                 out[code] = v
     return out
+
+
+def is_zt_row(sealed: Any, pct: Any) -> bool:
+    """默认口径算不算「涨停」：封板（在涨停池）**或**收盘涨幅落在 9.90%~10.29%。
+
+    纯函数，单测覆盖。`pct` 是百分数（10.1 表示 +10.1%）。
+    """
+    if sealed:
+        return True
+    if pct is None:
+        return False
+    try:
+        return ZT_PCT_MIN <= float(pct) <= ZT_PCT_MAX
+    except (TypeError, ValueError):
+        return False
+
+
+def is_ext_row(sealed: Any, pct: Any) -> bool:
+    """扩充口径：封板**或**涨幅 > 9.9%（含 20cm 涨停、含涨超未封板）。"""
+    if sealed:
+        return True
+    if pct is None:
+        return False
+    try:
+        return float(pct) > EXT_PCT
+    except (TypeError, ValueError):
+        return False
 
 
 def top_concepts(concepts: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
@@ -831,13 +866,14 @@ async def collect(date: str, *, finalize: bool = False, with_funds: bool = True)
             "hybk": r.get("hybk"),
         })
 
-    sealed_pool = [p for p in pool if p["sealed"] == 1]
+    zt_rows = [p for p in pool if is_zt_row(p["sealed"], p["pct"])]
+    ext_rows = [p for p in pool if is_ext_row(p["sealed"], p["pct"])]
     hot = top_concepts(concepts)          # 炒作口径：一票只算一个主概念
     themes = {
-        "zt": aggregate_themes(sealed_pool, concepts, broken, boards),
-        "ext": aggregate_themes(pool, concepts, broken, boards),
-        "zt_hot": aggregate_themes(sealed_pool, hot, broken, boards),
-        "ext_hot": aggregate_themes(pool, hot, broken, boards),
+        "zt": aggregate_themes(zt_rows, concepts, broken, boards),
+        "ext": aggregate_themes(ext_rows, concepts, broken, boards),
+        "zt_hot": aggregate_themes(zt_rows, hot, broken, boards),
+        "ext_hot": aggregate_themes(ext_rows, hot, broken, boards),
     }
     if not with_funds:
         for lst in themes.values():
@@ -846,14 +882,14 @@ async def collect(date: str, *, finalize: bool = False, with_funds: bool = True)
     await asyncio.to_thread(_save_board_meta, boards)
     await asyncio.to_thread(_write_snapshot, date, pool=pool, broken=broken,
                             themes=themes, concepts=concepts, boards=boards,
-                            total_zt=zt["tc"] or len(sealed_pool),
-                            total_ext=len(pool), finalized=finalize,
+                            total_zt=len(zt_rows) or zt["tc"],
+                            total_ext=len(ext_rows), finalized=finalize,
                             write_boards=with_funds)
     log.info("涨停棱镜 %s[%s]：涨停 %d / 扩充 %d / 炸板 %d / 主题 %d%s", date, src,
-             len(sealed_pool), len(pool), len(broken), len(themes["zt"]),
+             len(zt_rows), len(ext_rows), len(broken), len(themes["zt"]),
              "（定稿）" if finalize else "")
-    return {"date": date, "src": src, "total": zt["tc"] or len(sealed_pool),
-            "ext_total": len(pool), "broken": len(broken),
+    return {"date": date, "src": src, "total": len(zt_rows),
+            "ext_total": len(ext_rows), "broken": len(broken),
             "themes": len(themes["zt"]), "ext_themes": len(themes["ext"])}
 
 
@@ -900,6 +936,32 @@ def composite_rank(series: dict[str, list[int]]) -> dict[str, float]:
         return {}
     top = max(scores.values()) or 1.0
     return {b: round((s / top) ** 0.75, 3) for b, s in scores.items()}
+
+
+def apply_board_counts(rows: list[dict[str, Any]],
+                       counts: dict[str, int]) -> list[dict[str, Any]]:
+    """把「涨停」数换成**板块口径**，但保持传入的顺序（排序口径只决定顺序）。
+
+    否则主题榜按"炒作"排序时会显示 3 家、个股池却列出 5 只，看起来像数据错乱。
+    纯函数，单测覆盖。
+    """
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        n = counts.get(r.get("board"))
+        out.append({**r, "zt": int(n) if n is not None else int(r.get("zt") or 0)})
+    return out
+
+
+def _board_zt_map(dates: list[str], mode: str) -> dict[tuple[str, str], int]:
+    """(日期, 板块) → 该口径的涨停家数；用于把显示数换成板块口径。"""
+    if not dates:
+        return {}
+    q = ",".join("?" * len(dates))
+    with _conn() as c:
+        rows = c.execute(
+            f"SELECT date, board, zt FROM lu_themes WHERE mode=? AND date IN ({q})",
+            (mode, *dates)).fetchall()
+    return {(r["date"], r["board"]): int(r["zt"] or 0) for r in rows}
 
 
 def _mode_key(mode: str, sort: str = "hot") -> str:
@@ -1020,6 +1082,14 @@ def overview(date: str | None = None, *, days: int = 11, top: int = 15,
             if any(t.get("pct") is not None for t in by_date[x]):
                 by_date[x] = sorted(by_date[x],
                                     key=lambda t: (-(t.get("pct") or -1e9), -t["zt"]))
+    # 顺序已按「排序口径」定好；再把对外显示的涨停数换成**板块口径**（与个股池一致），
+    # 并记下 rank 让 build_matrix 别再按 zt 重排。
+    base_mode = mode[:-4] if mode.endswith("_hot") else mode
+    board_counts = _board_zt_map(cols, base_mode)
+    for x in cols:
+        fixed = apply_board_counts(
+            by_date[x], {b: n for (d0, b), n in board_counts.items() if d0 == x})
+        by_date[x] = [{**t, "rank": i} for i, t in enumerate(fixed)]
     per_day = [{"date": x, "themes": by_date[x]} for x in cols]
 
     # 统计期间的综合排名（颜色深浅）：窗口 = 周期表实际展示的那些交易日
@@ -1030,7 +1100,7 @@ def overview(date: str | None = None, *, days: int = 11, top: int = 15,
 
     # 角标统计窗口（右上角数字）：近 7 个交易日涨停总数；扩张/高潮/三共振仍按各自窗口算
     win = dates[-BADGE_DAYS:] if len(dates) >= BADGE_DAYS else dates
-    streak = _streak_map(win, mode)
+    streak = _streak_map(win, base_mode)
     matrix = build_matrix(per_day, top)
     for col in matrix:
         for cell in col:
@@ -1119,9 +1189,13 @@ def themes_of(date: str | None = None, mode: str = "zt", sort: str = "hot",
         rows.sort(key=lambda r: (-(r["pct"] or -1e9), -int(r["zt"] or 0)))
     else:
         rows.sort(key=lambda r: (-int(r["zt"] or 0), -int(r["max_lbc"] or 0), r["name"] or ""))
+    # 显示数统一用板块口径（与个股池列出的家数一致），排序口径只决定顺序
+    base_mode = mode[:-4] if mode.endswith("_hot") else mode
+    board_counts = {b: n for (d0, b), n in _board_zt_map([d], base_mode).items()}
+    rows = [{**dict(r), "zt": board_counts.get(r["board"], int(r["zt"] or 0))} for r in rows]
 
     win = dates[-BADGE_DAYS:] if len(dates) >= BADGE_DAYS else dates
-    streak = _streak_map(win, mode)
+    streak = _streak_map(win, base_mode)
     boards = [r["board"] for r in rows]
     series = _theme_series(boards, dates, mode)
 
@@ -1234,10 +1308,22 @@ def pool(date: str | None = None, *, theme: str | None = None,
            "p.reason, p.sealed FROM lu_pool p WHERE p.date=?")
     args: list[Any] = [d]
     if mode == "zt":
-        sql += " AND p.sealed=1"
+        # 默认口径：封板 ∪ 9.90~10.29 涨幅
+        sql += (" AND (p.sealed=1 OR (p.pct IS NOT NULL AND p.pct BETWEEN ? AND ?))")
+        args += [ZT_PCT_MIN, ZT_PCT_MAX]
+    else:
+        # 扩充口径：封板 ∪ 涨幅 > 9.9
+        sql += " AND (p.sealed=1 OR (p.pct IS NOT NULL AND p.pct > ?))"
+        args.append(EXT_PCT)
     if theme:
         sql += " AND p.code IN (SELECT code FROM lu_stock_concepts WHERE date=? AND board=?)"
         args += [d, theme]
+        if kind == "hot":
+            # 「炒作涨停」= 只列**以该板块为主概念**（BOARD_RANK 最靠前）的个股，
+            # 这才是"炒作口径"，和「板块涨停」（属于该板块就算）区分开。
+            sql += (" AND ? = (SELECT board FROM lu_stock_concepts "
+                    "WHERE date=? AND code=p.code ORDER BY rank LIMIT 1)")
+            args += [theme, d]
     if kind == "hot":
         # 「炒作涨停」= 同一批板块涨停股，但按**炒作强度**排（连板高度 → 涨幅），
         # 而不是按封单额。四个标签页都只看当前选中板块，不再有"全市场"页。
