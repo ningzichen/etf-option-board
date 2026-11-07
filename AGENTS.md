@@ -353,6 +353,13 @@ bash web/dev.sh       # 前端开发模式 :5273（/api 代理到 :6799）
   在 REST 失败时自动回落 CLI：`opencode run --pure --format json -m <LLM_CLI_MODEL> --dir <LLM_CLI_DIR>`，
   解析 NDJSON 的 `text` 事件；`LLM_CLI_FALLBACK=0` 关闭，`LLM_CLI_MODEL`/`LLM_CLI_TIMEOUT`(默认 240s)/`LLM_CLI_DIR` 可调。
   决策结果带 `_via: "cli"|"api"` 便于排查。免费额度无公开查询接口，只能看 429 的 `retry-after`。
+- **设置 → 大模型支持 opencode zen（2026-11-07）**：面板有「opencode zen 免费模型」预设，一键填
+  `https://opencode.ai/zen/v1` + `deepseek-v4.1-flash-free`，**API Key 由用户自己粘**
+  （取 `~/.local/share/opencode/auth.json` 的 `opencode-go`）。zen 必须带
+  `x-opencode-session` 头，前端（`browserLlm.modelRequest`）与后端代理（`llm_proxy.request_parts`）
+  都按「域名以 opencode.ai 结尾」自动补随机 UUID —— 免费模型判客户端就看这个头，别删。
+  默认走**看板后端代理**（zen 不给浏览器 CORS）；免费额度用尽时 REST 一律 429
+  `FreeUsageLimitError`，次日 08:00（北京时间）恢复，这期间涨停分析会退回规则文案。
 
 ## 风险/合规
 
