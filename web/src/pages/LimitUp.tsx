@@ -31,10 +31,10 @@ const TIERS = ["0~3", "3~5", "5~10", "10~15", "15以上"];
 const TYPES = ["全部类型", "产业链", "事件性", "风格性"];
 
 const POOL_TABS = [
-  { key: "theme", label: "板块涨停" },
-  { key: "hot", label: "炒作涨停" },
-  { key: "broken", label: "板块炸板" },
-  { key: "lan", label: "板块烂板" },
+  { key: "theme", label: "板块涨停", hint: "属于该板块的涨停股（与主题榜「涨停」列同一口径）" },
+  { key: "hot", label: "炒作涨停", hint: "只列「以该板块为主概念」的涨停股，比板块口径少，更聚焦" },
+  { key: "broken", label: "板块炸板", hint: "该板块当日炸板（触板未封住）的个股" },
+  { key: "lan", label: "板块烂板", hint: "该板块当日炸板 ≥3 次的反复开板个股" },
 ] as const;
 
 const fmtMD = (d: string) => (d.length === 8 ? `${d.slice(4, 6)}-${d.slice(6)}` : d);
@@ -480,6 +480,7 @@ export function LimitUpPage() {
                 {POOL_TABS.map((t) => (
                   <button
                     key={t.key}
+                    title={t.hint}
                     onClick={() => setPoolTab(t.key)}
                     className={cn("rounded px-2 py-0.5 text-[11px]",
                       poolTab === t.key
@@ -532,8 +533,9 @@ export function LimitUpPage() {
                   ))}
                   {!rows.length && (
                     <tr><td colSpan={5} className="py-6 text-center text-muted-foreground">
-                      {poolTab === "broken" || poolTab === "lan"
-                        ? "该主题当日没有炸板个股" : "没有个股"}
+                      {poolTab === "broken" || poolTab === "lan" ? "该板块当日没有炸板个股"
+                        : poolTab === "hot" ? "该板块没有以它为主概念（炒作）的涨停股，可切到「板块涨停」"
+                          : "没有个股"}
                     </td></tr>
                   )}
                 </tbody>
