@@ -62,7 +62,12 @@ def request_parts(data: object) -> tuple[str, dict, dict]:
     if url.netloc.endswith("opencode.ai"):
         import uuid
         headers["x-opencode-session"] = uuid.uuid4().hex
+    # DeepSeek 官方：思考模式默认开启，归纳类任务可显式关掉（只对该域名生效，
+    # 其它厂商不认这个字段，不能乱发）
+    thinking_off = data.get("thinkingOff") is True
     body = {"model": model, "max_tokens": max_tokens, "stream": False}
+    if thinking_off and url.netloc.endswith("deepseek.com") and protocol == "openai":
+        body["thinking"] = {"type": "disabled"}
     if protocol == "anthropic":
         if key:
             headers["x-api-key"] = key

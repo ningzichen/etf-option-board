@@ -8,6 +8,12 @@ import {
 
 const INPUT = "h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
+/** 是否 DeepSeek 官方地址（决定要不要显示「思考模式」开关并下发 thinking 参数） */
+function isDeepSeekHost(baseUrl: string): boolean {
+  try { return new URL(baseUrl).hostname.endsWith("deepseek.com"); }
+  catch { return false; }
+}
+
 /**
  * 快速填入的预设。API Key 一律留空由用户自己粘。
  *
@@ -27,9 +33,10 @@ const PRESETS = [
   {
     label: "DeepSeek 官方",
     patch: { protocol: "openai" as const, transport: "direct" as const,
-      baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" },
+      baseUrl: "https://api.deepseek.com/v1", model: "deepseek-flash",
+      thinking: "off" as const },
     hint: "platform.deepseek.com 申请 Key；直连（服务端已允许跨域），Key 不经过看板后端。"
-      + "要更强推理可把模型 ID 换成 deepseek-reasoner（更慢、更贵）。",
+      + "deepseek-flash 便宜快（关闭思考模式适合归纳/摘要）；要更强推理换 deepseek-v4-pro。",
   },
 ] as const;
 
@@ -138,6 +145,18 @@ export function LlmSettings() {
       <input className={INPUT} aria-label="模型 API Key" type="password" autoComplete="new-password" spellCheck={false}
         value={config.apiKey} onChange={(e) => change("apiKey", e.target.value)} placeholder="服务无需鉴权时可留空" />
     </label>
+    {isDeepSeekHost(config.baseUrl) && (
+      <div className="space-y-1.5">
+        <div className="font-medium">思考模式</div>
+        <Tabs tabs={[{ key: "default", label: "厂商默认" }, { key: "off", label: "关闭（更快更省）" }]}
+          value={config.thinking || "default"}
+          onChange={(v) => change("thinking", v as "default" | "off")} />
+        <div className="leading-relaxed text-muted-foreground">
+          DeepSeek 默认开启思考（effort=high）。归纳/摘要类任务（如涨停分析）关掉更快更省；
+          复杂推理（如期权决策）建议保留默认或用 deepseek-v4-pro。
+        </div>
+      </div>
+    )}
     <label className="block space-y-1.5">
       <span className="font-medium">最大输出 Token</span>
       <input className={INPUT} aria-label="最大输出 Token" type="number" min={1024} max={65536} step={1}
