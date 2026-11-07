@@ -1318,12 +1318,9 @@ def pool(date: str | None = None, *, theme: str | None = None,
     if theme:
         sql += " AND p.code IN (SELECT code FROM lu_stock_concepts WHERE date=? AND board=?)"
         args += [d, theme]
-        if kind == "hot":
-            # 「炒作涨停」= 只列**以该板块为主概念**（BOARD_RANK 最靠前）的个股，
-            # 这才是"炒作口径"，和「板块涨停」（属于该板块就算）区分开。
-            sql += (" AND ? = (SELECT board FROM lu_stock_concepts "
-                    "WHERE date=? AND code=p.code ORDER BY rank LIMIT 1)")
-            args += [theme, d]
+        # 注意：这里**不按主概念过滤**。「炒作涨停」只是排序不同（连板高度→涨幅），
+        # 集合与「板块涨停」一致 —— 否则同一板块的主题榜家数和个股池行数会对不上
+        # （2026-11-07 用户反馈）。炒作口径只影响周期表/主题榜的**排序**。
     if kind == "hot":
         # 「炒作涨停」= 同一批板块涨停股，但按**炒作强度**排（连板高度 → 涨幅），
         # 而不是按封单额。四个标签页都只看当前选中板块，不再有"全市场"页。

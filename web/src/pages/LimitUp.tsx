@@ -32,7 +32,7 @@ const TYPES = ["全部类型", "产业链", "事件性", "风格性"];
 
 const POOL_TABS = [
   { key: "theme", label: "板块涨停", hint: "属于该板块的涨停股（与主题榜「涨停」列同一口径）" },
-  { key: "hot", label: "炒作涨停", hint: "只列「以该板块为主概念」的涨停股，比板块口径少，更聚焦" },
+  { key: "hot", label: "炒作涨停", hint: "同一批涨停股，按炒作强度（连板高度→涨幅）排序" },
   { key: "broken", label: "板块炸板", hint: "该板块当日炸板（触板未封住）的个股" },
   { key: "lan", label: "板块烂板", hint: "该板块当日炸板 ≥3 次的反复开板个股" },
 ] as const;
