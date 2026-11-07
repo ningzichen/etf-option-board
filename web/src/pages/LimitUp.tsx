@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Frame, FrameHeader, FramePanel, FrameTitle } from "@/components/reui/frame";
@@ -163,6 +163,27 @@ export function LimitUpPage() {
     });
   }, [ov, type, dropST]);
 
+  /** 选中列红框：单独一层绝对定位画外框（不用逐格 border，避免和行分隔线拼成内横线） */
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const headRefs = useRef<Record<string, HTMLTableCellElement | null>>({});
+  const [box, setBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const th = headRefs.current[focusDate];
+      const table = wrapRef.current?.querySelector("table");
+      if (!th || !table) { setBox(null); return; }
+      setBox({
+        left: th.offsetLeft, top: th.offsetTop,
+        width: th.offsetWidth, height: table.offsetHeight - th.offsetTop,
+      });
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [focusDate, dates, matrix, level, type, dropST, ext, sortBy]);
+
+
   const onRefresh = async () => {
     if (busy) return;
     setBusy(true);
@@ -323,19 +344,19 @@ export function LimitUpPage() {
                 </div>
               )}
               <div className="overflow-x-auto">
+                <div ref={wrapRef} className="relative">
                 <table className="w-full border-collapse text-[12px]">
                   <thead>
                     <tr className="bg-muted/40">
-                      <th className="w-12 border-b px-2 py-2.5 text-center font-normal text-muted-foreground">
+                      <th className="w-16 min-w-[64px] whitespace-nowrap border-b px-2 py-2.5 text-center font-normal text-muted-foreground">
                         排名
                       </th>
                       {dates.map((d) => (
                         <th key={d}
+                          ref={(el) => { headRefs.current[d] = el; }}
                           className={cn(
                             "border-b px-2 py-2.5 text-center font-normal text-muted-foreground",
-                            d === curDate
-                              ? "border-x-2 border-t-2 border-rose-500 bg-rose-50 font-medium text-rose-700"
-                              : "",
+                            d === focusDate ? "bg-rose-50 font-medium text-rose-700" : "",
                           )}
                           title={d}>
                           {fmtMD(d)}
@@ -346,11 +367,10 @@ export function LimitUpPage() {
                   <tbody>
                     {Array.from({ length: 15 }).map((_, r) => (
                       <tr key={r}>
-                        <td className="border-b px-2 py-2 text-center text-muted-foreground">{r + 1}</td>
+                        <td className="w-16 min-w-[64px] whitespace-nowrap border-b px-2 py-2 text-center text-muted-foreground">{r + 1}</td>
                         {matrix.map((col, ci) => {
                           const cell = col[r] ?? null;
                           const active = cell?.board === theme;
-                          const isCurCol = dates[ci] === curDate;
                           return (
                             <td
                               key={ci}
@@ -359,8 +379,6 @@ export function LimitUpPage() {
                                 "border-b px-2 py-2 text-center",
                                 cell ? "cursor-pointer" : "",
                                 active ? "font-medium" : "text-slate-800 hover:brightness-[0.97]",
-                                isCurCol && "border-x-2 border-rose-500",
-                                isCurCol && r === 14 && "border-b-2",
                               )}
                               style={cell
                                 ? (active ? selectedStyle(cell.zt, themeMaxZt)
@@ -385,6 +403,13 @@ export function LimitUpPage() {
                     ))}
                   </tbody>
                 </table>
+                {/* 选中列的外框：单独一层绝对定位，避免和单元格边框拼出内横线 */}
+                {box && (
+                  <div aria-hidden
+                    className="pointer-events-none absolute rounded-sm border-2 border-rose-500"
+                    style={{ left: box.left, top: box.top, width: box.width, height: box.height }} />
+                )}
+                </div>
               </div>
               {/* 主题等级图例（顶部那条红色渐变条） */}
               <div className="flex items-center gap-3 px-3 py-2 text-[10px] text-muted-foreground">
