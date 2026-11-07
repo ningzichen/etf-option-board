@@ -243,28 +243,37 @@ export function LimitUpPage() {
 
       {/* 筛选开关 */}
       <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
-        <label className="flex items-center gap-1">
-          <input type="checkbox" checked={dropST} onChange={(e) => setDropST(e.target.checked)} />
-          删除ST
-        </label>
-        <label className="flex items-center gap-1" title="当日涨停数 > 前 5 日均值 × 1.5">
-          <input type="checkbox" checked={onlyExpand} onChange={(e) => setOnlyExpand(e.target.checked)} />
-          扩张主题
-        </label>
-        <label className="flex items-center gap-1" title="当日涨停数创近 20 日新高">
-          <input type="checkbox" checked={onlyClimax} onChange={(e) => setOnlyClimax(e.target.checked)} />
-          高潮主题
-        </label>
-        <label className="flex items-center gap-1" title="首板/连板/炸板三项同时高于前 5 日均值">
-          <input type="checkbox" checked={onlyResonance}
-            onChange={(e) => setOnlyResonance(e.target.checked)} />
-          三共振
-        </label>
-        <label className="flex items-center gap-1 font-medium text-foreground"
-          title="涨幅 > 9.9% 的个股也计为涨停（含未封板，剔除 N/C 开头新股）">
-          <input type="checkbox" checked={ext} onChange={(e) => setExt(e.target.checked)} />
-          扩充涨停
-        </label>
+        <Hint text="从榜单里过滤掉名称含 ST / *ST 的个股。ST 的涨跌停幅度是 5%（部分 20%），与常规 10%/20% 口径不同，混在一起会让涨停数虚高。">
+          <label className="flex cursor-help items-center gap-1">
+            <input type="checkbox" checked={dropST} onChange={(e) => setDropST(e.target.checked)} />
+            删除ST
+          </label>
+        </Hint>
+        <Hint text="只保留「当日涨停家数 > 前 5 个交易日均值 × 1.5」的主题，用来找正在加速发酵的方向。">
+          <label className="flex cursor-help items-center gap-1">
+            <input type="checkbox" checked={onlyExpand} onChange={(e) => setOnlyExpand(e.target.checked)} />
+            扩张主题
+          </label>
+        </Hint>
+        <Hint text="只保留「当日涨停家数创近 20 个交易日新高（且 ≥3 家）」的主题，通常对应情绪的高点。">
+          <label className="flex cursor-help items-center gap-1">
+            <input type="checkbox" checked={onlyClimax} onChange={(e) => setOnlyClimax(e.target.checked)} />
+            高潮主题
+          </label>
+        </Hint>
+        <Hint text="只保留「首板、连板、炸板三项同时高于各自前 5 日均值」的主题 —— 承接强、赚钱效应在扩散。">
+          <label className="flex cursor-help items-center gap-1">
+            <input type="checkbox" checked={onlyResonance}
+              onChange={(e) => setOnlyResonance(e.target.checked)} />
+            三共振
+          </label>
+        </Hint>
+        <Hint text="把当日涨幅 > 9.9% 的个股也算作涨停（含涨超但没封板的），涨停数与主题统计会一起放大；N/C 开头的新股已剔除（上市初期无涨跌幅限制）。">
+          <label className="flex cursor-help items-center gap-1 font-medium text-foreground">
+            <input type="checkbox" checked={ext} onChange={(e) => setExt(e.target.checked)} />
+            扩充涨停
+          </label>
+        </Hint>
         {excludedNames.length > 0 && (
           <span title="改 data/limitup_exclude.json 可增删，改完刷新页面即生效（读时过滤）">
             已排除：{excludedNames.join("、")}
@@ -534,6 +543,32 @@ export function LimitUpPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * 轻量 tooltip：鼠标悬停或键盘聚焦（Tab 到复选框）都能触发。
+ *
+ * 没用 title 属性（浏览器原生 tooltip 有 1 秒延迟、样式不可控）；
+ * 也没有引第三方库 —— 这里只是 CSS `group-hover` + `group-focus-within`。
+ * `pointer-events-none` 保证浮层不会挡住点击。
+ */
+function Hint({ text, children }: { text: string; children: React.ReactNode }) {
+  return (
+    <span className="group/hint relative inline-flex">
+      {children}
+      <span
+        role="tooltip"
+        className={cn(
+          "pointer-events-none absolute left-0 top-full z-[120] mt-1.5 hidden w-64",
+          "rounded-md border border-border bg-popover px-2 py-1.5 text-[11px] font-normal",
+          "leading-relaxed text-popover-foreground shadow-lg",
+          "group-hover/hint:block group-focus-within/hint:block",
+        )}
+      >
+        {text}
+      </span>
+    </span>
   );
 }
 

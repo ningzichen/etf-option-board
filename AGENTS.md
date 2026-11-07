@@ -212,6 +212,8 @@ bash web/dev.sh       # 前端开发模式 :5273（/api 代理到 :6799）
   `browserChat()` 用「设置 → 大模型」里配的 API（Base URL / 模型 / API Key，直连或后端代理）
   生成，按 `日期|口径|排序|板块` 缓存在 localStorage；没配置/失败就显示规则文案并引导去设置。
   别再往 `brief()` 里加大模型调用，也别恢复 `lu_brief` 缓存表。
+  **筛选勾选项的说明用本地 `Hint` 组件**（`LimitUp.tsx`，CSS `group-hover` + `group-focus-within`
+  双触发），不是原生 `title` —— 原生 tooltip 有 1 秒延迟且样式不可控，别再退回 title。
 - **板块资金（2026-11-04 新增，ADR-0003）**：单写路径 —— 只有 `services/board_collector.py`
   在交易时段写 `data/board_flow.db`（SQLite），`/api/board/*`、`/api/etf-flow/*`、`/api/em-flow/*`
   一律只读，**不要为了让页面有数据去实时抓东财**。采集分频：板块排行 30s（约 11 请求）、
