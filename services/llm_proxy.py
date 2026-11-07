@@ -57,6 +57,11 @@ def request_parts(data: object) -> tuple[str, dict, dict]:
         raise ValueError("最大输出 Token 需为 1024–65536 之间的整数")
 
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    # opencode zen 的免费模型要求带会话标识（否则会被判定为"非 OpenCode 客户端"）。
+    # 代理侧补一个随机 UUID，不落盘、不进日志。
+    if url.netloc.endswith("opencode.ai"):
+        import uuid
+        headers["x-opencode-session"] = uuid.uuid4().hex
     body = {"model": model, "max_tokens": max_tokens, "stream": False}
     if protocol == "anthropic":
         if key:
