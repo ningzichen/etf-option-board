@@ -227,6 +227,10 @@ bash web/dev.sh       # 前端开发模式 :5273（/api 代理到 :6799）
   **弹窗排版**：980px 宽，关键信息一律用 ReUI `Badge`（板块名/涨停数/涨幅/连板/模型名），
   板块块用 `Frame variant="inverse"`，个股是两列卡片（正文 13px/行高 24px），
   不要退回密集 `<table>` —— 长文原因在表格里读不动。
+  板块标题行**必须是单行**（`FrameHeader` 自带 `flex-col`，直接用会竖排，要用普通 `div.flex`）；
+  个股原因默认 `line-clamp-3` + 「展开全部」（同花顺 `reason_info` 常有 300~500 字，铺开一张卡 360px）。
+  **免责声明从数据里剥掉**：同花顺每条个股原因尾部都带「（免责声明：AI 生成…以上市公司公告为准）」，
+  `_clean_reason()` 在写入与渲染两侧都清，统一放到弹窗底部一行小字（12px）。
   **筛选勾选项的说明用本地 `Hint` 组件**（`LimitUp.tsx`，CSS `group-hover` + `group-focus-within`
   双触发），不是原生 `title` —— 原生 tooltip 有 1 秒延迟且样式不可控，别再退回 title。
 - **板块资金（2026-11-04 新增，ADR-0003）**：单写路径 —— 只有 `services/board_collector.py`
