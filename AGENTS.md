@@ -360,6 +360,10 @@ bash web/dev.sh       # 前端开发模式 :5273（/api 代理到 :6799）
   都按「域名以 opencode.ai 结尾」自动补随机 UUID —— 免费模型判客户端就看这个头，别删。
   默认走**看板后端代理**（zen 不给浏览器 CORS）；免费额度用尽时 REST 一律 429
   `FreeUsageLimitError`，次日 08:00（北京时间）恢复，这期间涨停分析会退回规则文案。
+  **「DeepSeek 官方」预设**：`https://api.deepseek.com/v1` + `deepseek-chat`，
+  实测 DeepSeek 允许浏览器跨域（OPTIONS 会回显 `access-control-allow-origin`），
+  所以默认**直连**、Key 不经看板后端；要更强推理把模型 ID 换成 `deepseek-reasoner`（更慢更贵）。
+  预设定义在 `LlmSettings.tsx` 的 `PRESETS` 数组，加厂商只改这里（API Key 一律留空给用户）。
 
 ## 风险/合规
 
