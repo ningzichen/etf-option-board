@@ -72,6 +72,7 @@ BACKFILL_DAYS = 30          # 启动回补的日历天数（含节假日，实�
 KEEP_DAYS = 150             # 库内保留窗口
 CONCEPT_RANK_LIMIT = 8      # 每只涨停股最多取排名前 N 个概念（越往后越牵强）
 PRISM_DAYS = 25
+BADGE_DAYS = 7              # 周期表右上角角标的统计窗口（近 N 个交易日涨停总数）
 EXT_PCT = 9.9               # 「扩充涨停」的涨幅门槛（> 9.9% 即算涨停）
 MODES = ("zt", "ext")       # zt = 东财涨停池；ext = 涨停池 ∪ 涨幅>9.9%
 
@@ -142,7 +143,7 @@ def classify_theme(name: str) -> str:
 
 # ---- 主题等级分档（UI 里那条红色渐变条） ---------------------------------------
 # 口径：**当日的涨停家数**分档（与经传那条 0~3 / 3~5 / 5~10 / 10~15 / 15以上 色条一致）。
-# 单元格右上角的数字才是「近 20 日涨停总数」，别把两者混起来。
+# 单元格右上角的数字才是「近 7 日涨停总数」（BADGE_DAYS），别把两者混起来。
 TIERS = ["0~3", "3~5", "5~10", "10~15", "15以上"]
 
 
@@ -1027,15 +1028,15 @@ def overview(date: str | None = None, *, days: int = 11, top: int = 15,
     heat = composite_rank({b: v["zt"] for b, v in
                            _theme_series(all_boards, cols, mode).items() if b})
 
-    # 20 日统计：角标 / 扩张 / 高潮 / 三共振
-    win = dates[-20:] if len(dates) >= 20 else dates
+    # 角标统计窗口（右上角数字）：近 7 个交易日涨停总数；扩张/高潮/三共振仍按各自窗口算
+    win = dates[-BADGE_DAYS:] if len(dates) >= BADGE_DAYS else dates
     streak = _streak_map(win, mode)
     matrix = build_matrix(per_day, top)
     for col in matrix:
         for cell in col:
             if not cell:
                 continue
-            cell["count_20d"] = streak.get(cell["board"], cell["zt"])
+            cell["count_7d"] = streak.get(cell["board"], cell["zt"])
             cell["tier"] = tier_of(cell["zt"])
             cell["type"] = classify_theme(cell["name"])
             cell["heat"] = round(heat.get(cell["board"], 0.0), 3)
@@ -1052,7 +1053,7 @@ def overview(date: str | None = None, *, days: int = 11, top: int = 15,
         themes.append({
             **t,
             "tier": tier_of(t["zt"]),
-            "count_20d": n20,
+            "count_7d": n20,
             "heat": round(heat.get(t["board"], 0.0), 3),
             "expanding": is_expanding(zt_series),
             "climax": is_climax(zt_series),
@@ -1119,7 +1120,7 @@ def themes_of(date: str | None = None, mode: str = "zt", sort: str = "hot",
     else:
         rows.sort(key=lambda r: (-int(r["zt"] or 0), -int(r["max_lbc"] or 0), r["name"] or ""))
 
-    win = dates[-20:] if len(dates) >= 20 else dates
+    win = dates[-BADGE_DAYS:] if len(dates) >= BADGE_DAYS else dates
     streak = _streak_map(win, mode)
     boards = [r["board"] for r in rows]
     series = _theme_series(boards, dates, mode)
@@ -1132,7 +1133,7 @@ def themes_of(date: str | None = None, mode: str = "zt", sort: str = "hot",
             "board": r["board"], "name": r["name"], "zt": int(r["zt"] or 0),
             "max_lbc": int(r["max_lbc"] or 0),
             "tier": tier_of(int(r["zt"] or 0)),
-            "count_20d": streak.get(r["board"], int(r["zt"] or 0)),
+            "count_7d": streak.get(r["board"], int(r["zt"] or 0)),
             "expanding": is_expanding(zt_series),
             "climax": is_climax(zt_series),
             "resonance": is_resonance(sr.get("first_board") or [0],
