@@ -1587,6 +1587,54 @@ async def tape_flow_dates(limit: int = Query(60, ge=1, le=365)):
     return {"dates": dates}
 
 
+@router.get("/tape-flow/turnover")
+async def tape_flow_turnover(date: str | None = Query(None)):
+    """资金流向页的累计成交额对比：当日 vs 前一交易日（全A逐笔直方图求和）。"""
+    try:
+        dates = sorted(await asyncio.to_thread(bf.available_dates, 120, "tape"))
+    except Exception as exc:  # noqa: BLE001
+        return {"axis": [], "today": [], "prev": [], "error": str(exc)}
+    if not dates:
+        return {"axis": [], "today": [], "prev": [], "error": "还没有逐笔数据"}
+    target = date if date in dates else dates[-1]
+    earlier = [d for d in dates if d < target]
+    prev_day = earlier[-1] if earlier else ""
+
+    def day_cum(day: str) -> dict[str, float]:
+        """按分钟汇总「买+卖」成交额（逐笔每笔只记一次）。"""
+        rows = bf.read_tape_bins(day, "amt")
+        per: dict[str, float] = {}
+        for t, _b, buy, sell in rows:
+            per[t] = per.get(t, 0.0) + float(buy or 0) + float(sell or 0)
+        return per
+
+    try:
+        cur = day_cum(target)
+        prev = day_cum(prev_day) if prev_day else {}
+    except Exception as exc:  # noqa: BLE001
+        return {"axis": [], "today": [], "prev": [], "error": str(exc)}
+    axis = sorted(cur)
+    if not axis:
+        return {"date": target, "prev_date": prev_day, "axis": [], "today": [], "prev": [],
+                "error": "该日没有逐笔成交额"}
+
+    def cumulative(per: dict[str, float]) -> list[float]:
+        run = 0.0
+        out: list[float] = []
+        for t in axis:
+            run += per.get(t, 0.0)
+            out.append(run)
+        return out
+
+    today_cum = cumulative(cur)
+    prev_cum = cumulative(prev)
+    return {"date": target, "prev_date": prev_day, "axis": axis,
+            "today": today_cum, "prev": prev_cum,
+            "today_total": today_cum[-1] if today_cum else 0.0,
+            "prev_total": prev_cum[-1] if prev_cum else 0.0,
+            "net_total": (today_cum[-1] if today_cum else 0.0) - (prev_cum[-1] if prev_cum else 0.0)}
+
+
 @router.get("/tape-flow/health")
 async def tape_flow_health():
     """采集器状态 + 最新一天的数据概况（页面用来显示「覆盖 N/M 只」）。"""

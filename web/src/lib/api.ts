@@ -145,6 +145,8 @@ export const api = {
   // 全A逐笔分档（资金流向页）：通达信 / Wind 两套口径
   tapeFlowDates: (limit = 120) => get(`/tape-flow/dates?limit=${limit}`),
   tapeFlowHealth: () => get("/tape-flow/health"),
+  tapeFlowTurnover: (date?: string) =>
+    get(`/tape-flow/turnover${date ? `?date=${date}` : ""}`),
   tapeFlowSeries: (preset: string, date?: string, th?: string) => {
     const qs = [`preset=${preset}`, date ? `date=${date}` : "", th ? `th=${encodeURIComponent(th)}` : ""]
       .filter(Boolean).join("&");
