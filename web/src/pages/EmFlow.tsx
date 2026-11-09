@@ -396,8 +396,19 @@ function EmBoardConfig({
   const label = kind === "concept" ? "概念" : "行业";
   const [busy, setBusy] = useState(false);
   const display: { code: string; name: string }[] = data?.display ?? [];
-  const all: { code: string; name: string }[] = data?.all ?? [];
+  const all: { code: string; name: string; py?: string }[] = data?.all ?? [];
   const [pick, setPick] = useState("");
+  const [q, setQ] = useState("");
+  // 支持名称 / 代码 / 拼音首字母模糊搜索（bdt → 半导体）
+  const filtered = useMemo(() => {
+    const raw = q.trim();
+    if (!raw) return all.slice(0, 30);
+    const kw = raw.toLowerCase();
+    return all.filter((a) =>
+      a.name.includes(raw)
+      || a.code.toLowerCase().includes(kw)
+      || String(a.py ?? "").includes(kw)).slice(0, 50);
+  }, [all, q]);
 
   const add = async () => {
     const item = all.find((a) => a.code === pick);
@@ -407,6 +418,7 @@ function EmBoardConfig({
       const res = await api.emFlowConfigAdd(item.code, item.name, kind);
       if (res?.error) throw new Error(res.error);
       setPick("");
+      setQ("");
       onChanged();
     } catch (e: any) {
       toast("添加失败", { description: String(e?.message || e) });
@@ -448,22 +460,51 @@ function EmBoardConfig({
     <Dialog open={open} onClose={onClose} title={`${label}展示配置（4 维主动净买额）`}>
       <div className="flex flex-col gap-3 text-xs">
         <div className="flex flex-wrap items-center gap-2">
-          <select
-            id="em-config-add" name="add-industry"
-            value={pick}
-            onChange={(e) => setPick(e.target.value)}
-            aria-label="选择要添加的行业"
-            className="min-w-0 flex-1 rounded border border-border bg-card px-2 py-1 text-[11px]"
-          >
-            <option value="">选择{label}（按 |主力净流入| 排序前 200）</option>
-            {all.map((a) => <option key={a.code} value={a.code}>{a.name} {a.code}</option>)}
-          </select>
+          <input
+            id="em-config-search" name="search"
+            value={q}
+            onChange={(e) => { setQ(e.target.value); setPick(""); }}
+            placeholder={`搜索${label}：名称 / 代码 / 拼音首字母（如 bdt）`}
+            aria-label={`搜索要添加的${label}`}
+            className="min-w-0 flex-1 rounded border border-border bg-card px-2 py-1 text-[11px] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
           <button type="button" onClick={() => void add()} disabled={!pick || busy}
             className="rounded-md border border-border px-2 py-1 text-[11px] disabled:opacity-50">添加</button>
           <button type="button" onClick={() => void reset()} disabled={busy}
             className="rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50">
             重置默认
           </button>
+        </div>
+
+        <div
+          role="listbox"
+          aria-label={`${label}候选`}
+          className="max-h-[220px] overflow-auto rounded-md border border-border/60"
+        >
+          {filtered.length === 0 ? (
+            <div className="px-2 py-3 text-center text-[11px] text-muted-foreground">没有匹配的{label}</div>
+          ) : filtered.map((a) => {
+            const active = a.code === pick;
+            const added = display.some((d) => d.code === a.code);
+            return (
+              <button
+                key={a.code}
+                type="button"
+                role="option"
+                aria-selected={active}
+                onClick={() => setPick(a.code)}
+                onDoubleClick={() => { setPick(a.code); void add(); }}
+                className={cn(
+                  "flex w-full items-center gap-2 border-b border-border/30 px-2 py-1 text-left text-[11px] last:border-b-0",
+                  active ? "bg-primary/10 font-medium text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                )}
+              >
+                <span className="min-w-0 flex-1 truncate">{a.name}</span>
+                <span className="shrink-0 text-[10px] opacity-60">{a.code}</span>
+                {added && <span className="shrink-0 text-[10px] text-warning">已添加</span>}
+              </button>
+            );
+          })}
         </div>
         <div className="text-[11px] text-muted-foreground">
           当前 {display.length} 个（{data?.customized ? "自定义" : `默认 Top${data?.default_limit ?? 40}`}）

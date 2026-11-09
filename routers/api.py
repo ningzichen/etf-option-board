@@ -1326,7 +1326,9 @@ async def _em_board_list(date: str | None, board_type: str) -> dict:
 
     display = [enrich(it) for it in base]
     all_rows = [{"code": r["code"], "name": r["name"], "flow": r["flow"],
-                 "pct": r.get("pct"), "speed": r.get("speed") or 0}
+                 "pct": r.get("pct"), "speed": r.get("speed") or 0,
+                 # 拼音首字母：配置弹窗支持「bdt → 半导体」式模糊搜索
+                 "py": pinyin_svc.initials(r["name"])}
                 for r in sorted(rank, key=lambda r: -abs(float(r.get("flow") or 0)))[:200]]
     return {"date": date, "display": display, "all": all_rows,
             "customized": bool(cfg.get("customized")),
