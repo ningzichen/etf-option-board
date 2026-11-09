@@ -9,7 +9,7 @@
 
 import { useEffect, useState } from "react";
 
-export type PageKey = "options" | "board-flow" | "board-multi" | "board-etf" | "board-em" | "flow-tape" | "wangwang" | "arisk" | "limitup";
+export type PageKey = "today" | "options" | "board-flow" | "board-multi" | "board-etf" | "board-em" | "flow-tape" | "wangwang" | "arisk" | "limitup";
 
 /** 一级导航分组：期权看板 ｜ 资金分时（内含四个子页）｜ 资金流向（全A逐笔）｜ 汪汪队 ｜ 风险监控 ｜ 涨停复盘 */
 export type SectionKey = "options" | "board" | "flow" | "wangwang" | "arisk" | "limitup";
@@ -25,6 +25,7 @@ export type PageDef = {
 
 export const PAGES: PageDef[] = [
   { key: "options", hash: "#/options", label: "期权看板", title: "缅A决策看板", section: "options" },
+  { key: "today", hash: "#/today", label: "今日结论", title: "今日结论 · 简洁模式（结论 / 动作 / 风险）", section: "options" },
   { key: "board-flow", hash: "#/board/flow", label: "主力资金分时", title: "主力资金分时", section: "board" },
   { key: "board-multi", hash: "#/board/multi", label: "主力资金多日", title: "主力资金多日", section: "board" },
   { key: "board-etf", hash: "#/board/etf", label: "ETF资金流", title: "ETF资金流", section: "board" },

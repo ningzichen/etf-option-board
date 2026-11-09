@@ -57,6 +57,7 @@ export const api = {
   },
   expiry: () => get("/expiry"),
   settings: () => get("/settings"),
+  today: () => get("/today"),
   saveSettings: async (body: {
     total_capital: number | string | null;
     risk_pct: number;

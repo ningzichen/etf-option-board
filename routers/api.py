@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from services import (alerts, board_collector as bcol, boardflow as bf, cls_hot,
                       decision,
                       pinyin as pinyin_svc,
-                      deploy as deploy_svc, em, index_levels, kronos, llm, llm_proxy,
+                      deploy as deploy_svc, em, humanize as hz, index_levels, kronos, llm, llm_proxy,
                       market_service as ms, monitor, option_playbook as playbook,
                       option_service as osvc, push as push_svc, reversal, strategy, tape_flow as tf,
                       user_settings as usv,
@@ -155,6 +155,31 @@ async def picks_top(n: int = 6, force: int = 0):
     """跨 6 只 ETF 的优选合约横评（性价比 0.6 + 波动 0.4）。"""
     from services import top_picks
     return await top_picks.snapshot(n=n, force=bool(force))
+
+
+@router.get("/today")
+async def today_view():
+    """简洁模式聚合：方向结论（人话）+ 唯一动作 + 风险提示。
+
+    只读现有快照（direction / top_picks / 到期日历 / 告警），不新增数据源；
+    全部文案与阈值翻译在 services/humanize.py（纯函数），前端不硬编码口径。
+    """
+    from services import top_picks
+
+    now = dt.datetime.now()
+    try:
+        dirs = await strategy.directions()
+    except Exception as exc:  # noqa: BLE001 — 简洁模式降级为「看不清」，不给错结论
+        log.warning("简洁模式方向快照失败: %s", exc)
+        dirs = {}
+    try:
+        picks = await top_picks.snapshot(n=6)
+    except Exception as exc:  # noqa: BLE001 — 没有优选只是少了动作卡
+        log.warning("简洁模式优选合约失败: %s", exc)
+        picks = {"items": []}
+    return hz.compose(directions=dirs, etf_meta=ETFS, picks=picks,
+                      expiry=decision.expiry_calendar(now.date()),
+                      alerts=alerts.history(30), now=now)
 
 
 # 左侧迷你走势的整包缓存：冷启动要并发拉 12 条分时（1~6 秒），

@@ -7,6 +7,7 @@ import { useState } from "react";
 
 export function TopBar({
   external, national, health, clock, onRefresh, onOpenSettings, navOpen, onToggleNav, subtitle,
+  mode, onModeChange,
 }: {
   external: any[];
   national: any;
@@ -19,6 +20,9 @@ export function TopBar({
   /** 左侧导航当前是否常驻展开（决定按钮图标与提示） */
   navOpen?: boolean;
   onToggleNav?: () => void;
+  /** 简洁 / 专业模式；只在期权相关页面传入，其它页面不显示切换器 */
+  mode?: "simple" | "pro";
+  onModeChange?: (mode: "simple" | "pro") => void;
 }) {
   const [muted, setMuted] = useState(!sound.enabled);
   const nt = national?.score ?? 0;
@@ -53,6 +57,33 @@ export function TopBar({
           </span>
         </div>
         <div className="flex-1" />
+        {mode && onModeChange ? (
+          <div
+            className="flex shrink-0 overflow-hidden rounded-full border border-border"
+            role="tablist"
+            aria-label="展示模式"
+          >
+            {([["simple", "简洁"], ["pro", "专业"]] as const).map(([key, label]) => {
+              const active = mode === key;
+              return (
+                <button
+                  key={key}
+                  role="tab"
+                  aria-selected={active}
+                  title={key === "simple" ? "简洁：只给结论、唯一动作与风险提示" : "专业：全部行情、期权链与资金面板"}
+                  onClick={() => { if (!active) onModeChange(key); }}
+                  className={
+                    active
+                      ? "bg-foreground px-3 py-1 text-[11px] font-medium text-background"
+                      : "px-3 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+                  }
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
         <div className="hidden items-center gap-2 xl:flex">
           {(external ?? []).slice(0, 5).map((e) => (
             <div key={e.key} className="flex items-baseline gap-1 whitespace-nowrap">

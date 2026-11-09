@@ -3,8 +3,7 @@ import { TopBar } from "@/components/TopBar";
 import { SideNav } from "@/components/SideNav";
 import { BoardSubNav } from "@/components/BoardSubNav";
 import { SettingsDialog } from "@/components/SettingsDialog";
-import { usePageRoute, titleOf, type PageKey } from "@/lib/route";
-import {
+import { navigate, usePageRoute, titleOf, type PageKey } from "@/lib/route";import {
   isBoardPage, pageLabel, readNavOpen, rememberBoardPage, useIsWide, writeNavOpen,
 } from "@/lib/nav";
 import { requestRefresh } from "@/lib/refresh";
@@ -12,6 +11,7 @@ import { ensureAlertsStarted } from "@/lib/alertBus";
 import { api } from "@/lib/api";
 import { usePolling } from "@/lib/usePolling";
 import { OptionsBoard } from "@/pages/OptionsBoard";
+import { TodayPage } from "@/pages/Today";
 import { EtfFlowPage } from "@/pages/EtfFlow";
 import { EmFlowPage } from "@/pages/EmFlow";
 import { BoardMultiPage } from "@/pages/BoardMulti";
@@ -31,6 +31,7 @@ const BUNDLE_ID = (() => {
 /** 页面注册表：唯一的分发表，新增页面只改这里 + route.ts 的 PAGES。 */
 const VIEWS: Record<PageKey, () => JSX.Element> = {
   options: OptionsBoard,
+  today: TodayPage,
   "board-flow": BoardFlowPage,
   "board-multi": BoardMultiPage,
   "board-etf": EtfFlowPage,
@@ -146,6 +147,8 @@ export default function App() {
           onToggleNav={toggleNav}
           onRefresh={requestRefresh}
           onOpenSettings={() => { setSettingsTab("trading"); setSettingsOpen(true); }}
+          mode={page === "today" ? "simple" : page === "options" ? "pro" : undefined}
+          onModeChange={(m) => navigate(m === "simple" ? "today" : "options")}
         />
         <SettingsDialog open={settingsOpen} initialTab={settingsTab}
           onClose={() => setSettingsOpen(false)} />
