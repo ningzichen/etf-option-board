@@ -1541,9 +1541,19 @@ async def tape_flow_series(
 
 @router.post("/tape-flow/scan")
 async def tape_flow_scan():
-    """手动重算一次全A逐笔（约 1~2 分钟，后台跑，立即返回）。"""
+    """手动重算一次全A逐笔（单次实测 6~7 分钟，后台跑，立即返回）。
+
+    采集器忙时**必须返回 ok:false**：旧版无条件 ok:true，前端点了没反应却弹「已重算」。
+    不允许并发（`run_scan` 自带 busy 守卫，这里提前拦下以便给出已用时长）。
+    """
+    st = tf.state()
+    if st.get("busy"):
+        started = st.get("started_in")
+        used = f"（已 {int(started)} 秒）" if started is not None else ""
+        return {"ok": False, "busy": True, "started_in": started,
+                "msg": f"正在重算{used}，完成后本页自动刷新"}
     asyncio.create_task(tf.run_scan(force=True))
-    return {"ok": True, "msg": "已在后台重算全A逐笔，约 1~2 分钟后刷新页面"}
+    return {"ok": True, "msg": "已开始重算全A逐笔，约 6 分钟；完成后本页自动刷新"}
 
 
 @router.get("/board/index-rank")

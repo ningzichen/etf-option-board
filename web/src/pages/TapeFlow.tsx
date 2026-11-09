@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Frame, FramePanel, FrameHeader, FrameTitle } from "@/components/reui/frame";
@@ -32,6 +32,27 @@ const NOTES: Record<string, string> = {
     + "机构 ≥400 万，主力 70–400 万，大户 15–70 万，散户 <15 万（门槛按 Wind 11-06 截图拟合）。",
 };
 
+/** 采集只在连续竞价跑：09:30–11:30 / 13:00–15:00（东财逐笔只能取最新交易日）。 */
+const SESSIONS: [number, number][] = [[9 * 60 + 30, 11 * 60 + 30], [13 * 60, 15 * 60]];
+const FINAL_MIN = 15 * 60 + 5;
+
+/** 当前时钟处在哪个阶段——倒计时只对「盘中」有意义，其余给明确文案。 */
+function phaseOf(now: Date): "morning" | "lunch" | "afternoon" | "pre" | "closed" | "holiday" {
+  const wd = now.getDay();
+  if (wd === 0 || wd === 6) return "holiday";
+  const m = now.getHours() * 60 + now.getMinutes();
+  if (m < SESSIONS[0][0]) return "pre";
+  if (m >= FINAL_MIN) return "closed";
+  if (m <= SESSIONS[0][1]) return "morning";
+  if (m < SESSIONS[1][0]) return "lunch";
+  return "afternoon";
+}
+
+const mmss = (sec: number): string => {
+  const s = Math.max(0, Math.round(sec));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+
 type Bucket = {
   key: string; name: string; thr: number;
   buy?: number; sell?: number; net?: number; share?: number;
@@ -40,8 +61,11 @@ type Bucket = {
 /**
  * 资金流向：全A 逐笔分档的两张分时图（通达信 / Wind 两套口径）。
  *
- * 数据来自 `data/board_flow.db` 的逐笔直方图（每分钟 × 金额档 × 买卖），
- * 盘中每 10 分钟重算、收盘后 15:05 定稿；门槛改了只是重新求和，不重跑逐笔。
+ * 数据来自 `data/board_flow.db` 的逐笔直方图（每分钟 × 金额档 × 买卖）。
+ *
+ * 三个动作别混：**重算** = 重跑全A逐笔入库（单次实测 6~7 分钟）；**刷新** = 读本地库
+ * 重绘（毫秒）；**应用** = 改门槛后按库里直方图重算（毫秒，不重跑逐笔）。
+ * 盘中两轮重算的开始时间至少隔 10 分钟（`SCAN_INTERVAL`），收盘后 15:05 补跑定稿。
  */
 export function TapeFlowPage() {
   const [preset, setPreset] = useState<string>("tdx");
@@ -62,12 +86,47 @@ export function TapeFlowPage() {
   const dates: string[] = datesView?.dates ?? [];
   const latest = dates[0] ?? "";
 
+  // 采集状态用于倒计时：15 秒一轮（只读库头，很轻），倒计时再靠本地秒表递减
   const { data: health, refresh: refreshHealth } = usePolling(
-    () => api.tapeFlowHealth(), 60_000, [], { kind: "ctx", code: "tape-health" });
+    () => api.tapeFlowHealth(), 15_000, [], { kind: "ctx", code: "tape-health" });
 
   const { data, refresh, loading } = usePolling(
     () => api.tapeFlowSeries(preset, date || undefined, applied || undefined),
     60_000, [preset, date, applied]);
+
+  // 服务端只给「相对秒数」，本地逐秒递减 + 每次 health 轮询重新校准（避免两端时钟差）
+  const [nowTs, setNowTs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowTs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const eta = useRef<{ at: number; nextIn: number; started: number | null } | null>(null);
+  const etasig = `${health?.state?.last_run ?? ""}|${health?.state?.next_scan_in ?? ""}|${health?.state?.started_in ?? ""}`;
+  useEffect(() => {
+    const st = health?.state;
+    if (!st) return;
+    eta.current = {
+      at: Date.now(),
+      nextIn: Number(st.next_scan_in ?? 0),
+      started: st.started_in == null ? null : Number(st.started_in),
+    };
+  }, [etasig]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const drift = eta.current ? (nowTs - eta.current.at) / 1000 : 0;
+  const busy = !!health?.state?.busy;
+  const nextIn = eta.current ? Math.max(0, eta.current.nextIn - drift) : null;
+  const elapsed = eta.current?.started != null ? Math.max(0, eta.current.started + drift) : null;
+
+  // 新数据入库（last_run 变化）→ 立刻重绘曲线，不等下一轮 60s
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+  const lastRunRef = useRef<string>("");
+  useEffect(() => {
+    const lr = String(health?.state?.last_run ?? "");
+    if (!lr) return;
+    if (lastRunRef.current && lr !== lastRunRef.current) void refreshRef.current();
+    lastRunRef.current = lr;
+  }, [health?.state?.last_run]);
 
   const buckets: Bucket[] = data?.buckets ?? [];
   const series = useMemo(
@@ -81,9 +140,8 @@ export function TapeFlowPage() {
     .map(({ p, color }) => ({ code: p.key, name: p.name, values: p.values, color }));
   const meta = data?.meta ?? {};
   const updated = meta.updated_at || health?.state?.last_run || "";
-  const state = health?.state ?? {};
-  const busy = !!state.busy;
   const err = data?.error;
+  const phase = phaseOf(new Date(nowTs));
 
   const dateOptions = useMemo(() => {
     const out = [...dates];
@@ -101,10 +159,22 @@ export function TapeFlowPage() {
     toast.success(`门槛已改为 ${clean.join(" / ")} ${UNIT[preset] ?? "万元"}`);
   };
 
+  // 「立即重算」= 重跑全A逐笔（单次实测 6~7 分钟）。采集器忙时后端返回 ok:false，
+  // 这里照实提示「已重算 x:xx」，不要谎报成功（旧版无条件弹成功，点了没反应）。
   const scan = async () => {
-    await api.tapeFlowScan();
-    toast.success("已在后台重算全A逐笔，约 1~2 分钟后刷新");
-    setTimeout(() => { refreshHealth(); refresh(); }, 95_000);
+    let r: any = null;
+    try {
+      r = await api.tapeFlowScan();
+    } catch {
+      toast.error("重算请求失败，请稍后重试");
+      return;
+    }
+    if (r?.ok) {
+      toast.success("已开始重算，约 6 分钟；完成后本页自动刷新");
+      refreshHealth();
+    } else {
+      toast.info(r?.msg || "正在重算中，完成后本页自动刷新");
+    }
   };
 
   return (
@@ -116,7 +186,26 @@ export function TapeFlowPage() {
               <FrameTitle className="text-sm">资金流向</FrameTitle>
               <Tabs tabs={PRESETS} value={preset} onChange={setPreset} />
               <DayTag date={data?.date} latest={latest} />
-              {busy ? <Badge variant="info-light">重算中…</Badge> : null}
+              {busy ? (
+                <Badge variant="info-light">
+                  重算中{elapsed != null ? ` ${mmss(elapsed)}` : "…"}
+                </Badge>
+              ) : phase === "lunch" ? (
+                <span className="text-[11px] text-muted-foreground">休市 · 13:00 继续</span>
+              ) : phase === "closed" ? (
+                <span className="text-[11px] text-muted-foreground">已定稿 15:05</span>
+              ) : phase === "holiday" ? (
+                <span className="text-[11px] text-muted-foreground">休市</span>
+              ) : phase === "pre" ? (
+                <span className="text-[11px] text-muted-foreground">09:30 开始重算</span>
+              ) : nextIn != null ? (
+                <span
+                  className="text-[11px] text-muted-foreground tnum"
+                  title="全A逐笔每 10 分钟重算一次（单次约 6 分钟），也可点右侧「立即重算」"
+                >
+                  下次刷新 {mmss(nextIn)}
+                </span>
+              ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
               {prices.length ? (
@@ -178,11 +267,17 @@ export function TapeFlowPage() {
               <button
                 type="button"
                 onClick={scan}
-                disabled={busy}
-                title="重算全A逐笔（约 1~2 分钟，后台跑）"
+                disabled={busy || phase === "lunch" || phase === "holiday" || phase === "pre"}
+                title={busy
+                  ? "正在重算，完成后自动刷新"
+                  : phase === "lunch" || phase === "pre"
+                    ? "休市不重算（逐笔只反映最新交易日，盘中再跑）"
+                    : phase === "closed"
+                      ? "补跑收盘定稿（单次约 6 分钟，后台跑）"
+                      : "立即重跑全A逐笔（单次约 6 分钟，后台跑）"}
                 className="flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
               >
-                <Zap className="size-3" aria-hidden />重算
+                <Zap className={cn("size-3", busy && "animate-pulse")} aria-hidden />立即重算
               </button>
             </div>
           </FrameHeader>
@@ -260,7 +355,7 @@ export function TapeFlowPage() {
               {meta.stocks_ok ? `覆盖 ${meta.stocks_ok}/${meta.stocks_total} 只 · ` : ""}
               {meta.amount ? `逐笔成交额 ${flowMoney(meta.amount)} · ` : ""}
               {data?.date ? `${data.date} · ` : ""}
-              盘中每 10 分钟重算、收盘后 15:05 定稿；逐笔只能取最新一个交易日，历史靠本地库留存。
+              盘中每 10 分钟重算一次（单次约 6 分钟）、收盘后 15:05 补跑定稿；逐笔只能取最新一个交易日，历史靠本地库留存。
             </div>
             {err ? <div className="text-warning">{err}</div> : null}
           </div>

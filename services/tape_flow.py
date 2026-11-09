@@ -77,7 +77,9 @@ PRESETS: dict[str, dict] = {
 # 「Wind 主力净流入」= Wind 的「机构 + 主力」两档合并 = 单笔 ≥70 万（与资金流向页同口径）
 WIND_MAIN_MIN = 70.0     # 万元
 SESSION = (("09:30", "11:30"), ("13:00", "15:00"))
-SCAN_INTERVAL = 600.0      # 盘中每 10 分钟重算一次（一次约 100~140 秒）
+SCAN_INTERVAL = 600.0      # 盘中两轮**开始**之间至少隔 10 分钟（一次扫描实测 350~420 秒）
+                           # 早先按「上一轮结束后再等 10 分钟」计，叠加 6~7 分钟扫描后实际
+                           # 变成 16~17 分钟才更新一次，与页面「每 10 分钟」不符（2026-11-09 修）
 FINAL_HM = "15:05"         # 收盘后再跑一次定稿
 CONCURRENCY = 10
 MIN_COVERAGE = 0.90        # 覆盖率不足就不覆盖已有数据
@@ -85,7 +87,10 @@ AMOUNT_TOL = 0.03          # 与官方两市成交额的允许偏差
 
 _state: dict = {"cycles": 0, "busy": False, "last_run": None, "last_date": None,
                 "stocks_ok": 0, "stocks_total": 0, "last_error": None}
-_last_scan_mono: float | None = None
+# 计时基准分两个：next_scan_in 用「上一轮开始」算周期；started_in 是当前轮已跑时长。
+_last_scan_mono: float | None = None        # 上一轮**开始**的 monotonic
+_scan_started_mono: float | None = None     # 当前轮开始（busy 时用于「已用 x:xx」）
+_final_attempt_day: str | None = None       # 哪一天的收盘定稿已经尝试过（失败也不重试，避免死循环轰炸上游）
 
 
 # --------------------------------------------------------------------------
@@ -382,10 +387,11 @@ async def _trading_day() -> tuple[str, float]:
 
 async def run_scan(force: bool = False) -> dict:
     """跑一次全A逐笔并落库（整日覆盖）。force 保留给手动接口语义。"""
-    global _state, _last_scan_mono
+    global _last_scan_mono, _scan_started_mono
     if _state.get("busy"):
         return {"ok": False, "error": "上一轮还没跑完"}
     _state["busy"] = True
+    _scan_started_mono = _last_scan_mono = time.monotonic()
     t0 = time.time()
     try:
         date, official = await _trading_day()
@@ -413,7 +419,6 @@ async def run_scan(force: bool = False) -> dict:
                        "last_run": dt.datetime.now().isoformat(timespec="seconds"),
                        "last_date": date, "stocks_ok": ok, "stocks_total": total,
                        "last_error": None})
-        _last_scan_mono = time.monotonic()
         log.info("全A逐笔入库 %s：%d 只 / 金额档 %d 行 / 手数档 %d 行 / 板块 %d 个 / %.0f 亿 / %.0fs",
                  date, ok, len(got["amt"]), len(got["lot"]), boards, ours / 1e8,
                  time.time() - t0)
@@ -426,6 +431,7 @@ async def run_scan(force: bool = False) -> dict:
         return {"ok": False, "error": str(exc)}
     finally:
         _state["busy"] = False
+        _scan_started_mono = None
 
 
 def _after_final(now: dt.datetime) -> bool:
@@ -441,7 +447,15 @@ async def run_forever() -> None:
                 if _last_scan_mono is None or time.monotonic() - _last_scan_mono >= SCAN_INTERVAL:
                     await run_scan()
             elif now.weekday() < 5 and _after_final(now):
-                if _state.get("last_date") != now.strftime("%Y-%m-%d"):
+                # 定稿：今天还没有 15:05 之后成功跑过，就补一次（每天最多一次）。
+                # 旧判据是 last_date != 今天——盘中每轮都会把它改成今天，导致收盘定稿
+                # 永远不触发（数据停在最后一轮盘中扫描）。
+                global _final_attempt_day
+                last = _state.get("last_run") or ""
+                today = now.strftime("%Y-%m-%d")
+                done = last[:10] == today and last[11:16] >= FINAL_HM
+                if not done and _final_attempt_day != today:
+                    _final_attempt_day = today
                     await run_scan()
         except asyncio.CancelledError:
             raise
@@ -452,4 +466,19 @@ async def run_forever() -> None:
 
 
 def state() -> dict:
-    return dict(_state)
+    """采集器状态 + 供前端算倒计时的相对秒数。
+
+    - ``next_scan_in``：距下一轮**开始**还有多少秒（盘中才有意义；非交易时段由前端按
+      交易时段自行显示「休市/已定稿」，这里只给数字，不做展示决策）。
+    - ``started_in``：当前轮已经跑了多少秒（busy 时用于「重算中 3:12」）。
+    - ``interval``：周期秒数，前端据此校准本地逐秒递减。
+    """
+    st = dict(_state)
+    now = time.monotonic()
+    st["interval"] = SCAN_INTERVAL
+    st["next_scan_in"] = (
+        max(0.0, SCAN_INTERVAL - (now - _last_scan_mono))
+        if _last_scan_mono is not None else 0.0)
+    st["started_in"] = (
+        (now - _scan_started_mono) if _scan_started_mono is not None else None)
+    return st
