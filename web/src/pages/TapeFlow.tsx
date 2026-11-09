@@ -90,7 +90,7 @@ export function TapeFlowPage() {
   const { data: health, refresh: refreshHealth } = usePolling(
     () => api.tapeFlowHealth(), 15_000, [], { kind: "ctx", code: "tape-health" });
 
-  const { data, refresh, loading } = usePolling(
+  const { data, refresh } = usePolling(
     () => api.tapeFlowSeries(preset, date || undefined, applied || undefined),
     60_000, [preset, date, applied]);
 
@@ -290,7 +290,7 @@ export function TapeFlowPage() {
                 aria-label="刷新"
                 className="rounded-md border border-border p-1 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <RefreshCw className={cn("size-3", loading && "animate-spin")} aria-hidden />
+                <RefreshCw className={cn("size-3", !data && "animate-spin")} aria-hidden />
               </button>
               <button
                 type="button"

@@ -316,8 +316,10 @@ async def _em_cycle(now: dt.datetime) -> None:
             crank = await asyncio.to_thread(bf.read_rank, date, "concept")
         except Exception:
             crank = []
-        targets += [(f"90.{t['code']}", "concept", t["name"])
-                    for t in bf.pick_em_concepts(crank)]
+        ccfg = await asyncio.to_thread(bf.load_em_config, "concept")
+        cpicked = (ccfg["items"] if ccfg.get("customized") and ccfg["items"]
+                   else bf.pick_em_concepts(crank))
+        targets += [(f"90.{t['code']}", "concept", t["name"]) for t in cpicked]
 
     if mono - _em_last["extra"] >= _EM_EXTRA_INTERVAL:
         _em_last["extra"] = mono

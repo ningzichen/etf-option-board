@@ -445,7 +445,7 @@ function EmBoardConfig({
   };
 
   return (
-    <Dialog open={open} onClose={onClose} title="行业展示配置（4 维主动净买额）">
+    <Dialog open={open} onClose={onClose} title={`${label}展示配置（4 维主动净买额）`}>
       <div className="flex flex-col gap-3 text-xs">
         <div className="flex flex-wrap items-center gap-2">
           <select

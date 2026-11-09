@@ -1315,9 +1315,7 @@ async def _em_board_list(date: str | None, board_type: str) -> dict:
 
     limit = bf.EM_DEFAULT_CONCEPTS if board_type == "concept" else bf.EM_DEFAULT_INDUSTRIES
     pick = bf.pick_em_concepts if board_type == "concept" else bf.pick_em_industries
-    cfg = {"customized": False, "items": []}
-    if board_type != "concept":
-        cfg = await asyncio.to_thread(bf.load_em_config)
+    cfg = await asyncio.to_thread(bf.load_em_config, board_type)
     by = {r["code"]: r for r in rank}
     base = cfg["items"] if cfg.get("customized") and cfg["items"] else pick(rank)
 
@@ -1348,31 +1346,36 @@ async def em_flow_concepts(date: str | None = Query(None)):
 
 
 @router.post("/em-flow/config/add")
-async def em_flow_config_add(code: str = Query(...), name: str = Query("")):
+async def em_flow_config_add(code: str = Query(...), name: str = Query(""),
+                             kind: str = Query("industry", description="industry / concept")):
+    kind = "concept" if kind == "concept" else "industry"
     if not code.startswith("BK"):
-        return {"error": "行业代码必须是 BK 开头"}
-    cfg = await asyncio.to_thread(bf.load_em_config)
+        return {"error": "板块代码必须是 BK 开头"}
+    cfg = await asyncio.to_thread(bf.load_em_config, kind)
     items = cfg["items"] if cfg.get("customized") else []
     if not any(it["code"] == code for it in items):
         items.append({"code": code, "name": name or code})
-    if not await asyncio.to_thread(bf.save_em_config, {"customized": True, "items": items}):
-        return {"error": "行业配置写入失败"}
+    if not await asyncio.to_thread(bf.save_em_config, {"customized": True, "items": items}, kind):
+        return {"error": "配置写入失败"}
     return {"customized": True, "items": items}
 
 
 @router.delete("/em-flow/config")
-async def em_flow_config_remove(code: str = Query(...)):
-    cfg = await asyncio.to_thread(bf.load_em_config)
+async def em_flow_config_remove(code: str = Query(...),
+                                kind: str = Query("industry", description="industry / concept")):
+    kind = "concept" if kind == "concept" else "industry"
+    cfg = await asyncio.to_thread(bf.load_em_config, kind)
     items = [it for it in (cfg["items"] if cfg.get("customized") else []) if it["code"] != code]
-    if not await asyncio.to_thread(bf.save_em_config, {"customized": True, "items": items}):
-        return {"error": "行业配置写入失败"}
+    if not await asyncio.to_thread(bf.save_em_config, {"customized": True, "items": items}, kind):
+        return {"error": "配置写入失败"}
     return {"customized": True, "items": items}
 
 
 @router.post("/em-flow/config/reset")
-async def em_flow_config_reset():
-    if not await asyncio.to_thread(bf.save_em_config, {"customized": False, "items": []}):
-        return {"error": "行业配置写入失败"}
+async def em_flow_config_reset(kind: str = Query("industry", description="industry / concept")):
+    kind = "concept" if kind == "concept" else "industry"
+    if not await asyncio.to_thread(bf.save_em_config, {"customized": False, "items": []}, kind):
+        return {"error": "配置写入失败"}
     return {"customized": False, "items": []}
 
 

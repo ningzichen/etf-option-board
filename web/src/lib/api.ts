@@ -132,12 +132,13 @@ export const api = {
   emFlowConcepts: () => get("/em-flow/concepts"),
   emFlowSeries: (kind: string, code: string) =>
     get(`/em-flow/series?target_type=${kind}&code=${encodeURIComponent(code)}`),
-  emFlowConfigAdd: async (code: string, name: string) =>
-    (await fetch(`${BASE}/em-flow/config/add?code=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}`,
+  emFlowConfigAdd: async (code: string, name: string, kind = "industry") =>
+    (await fetch(`${BASE}/em-flow/config/add?code=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}&kind=${kind}`,
       { method: "POST" })).json(),
-  emFlowConfigRemove: async (code: string) =>
-    (await fetch(`${BASE}/em-flow/config?code=${encodeURIComponent(code)}`, { method: "DELETE" })).json(),
-  emFlowConfigReset: async () => (await fetch(`${BASE}/em-flow/config/reset`, { method: "POST" })).json(),
+  emFlowConfigRemove: async (code: string, kind = "industry") =>
+    (await fetch(`${BASE}/em-flow/config?code=${encodeURIComponent(code)}&kind=${kind}`, { method: "DELETE" })).json(),
+  emFlowConfigReset: async (kind = "industry") =>
+    (await fetch(`${BASE}/em-flow/config/reset?kind=${kind}`, { method: "POST" })).json(),
 
   // 全A逐笔分档（资金流向页）：通达信 / Wind 两套口径
   tapeFlowDates: (limit = 120) => get(`/tape-flow/dates?limit=${limit}`),

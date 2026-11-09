@@ -25,6 +25,7 @@ _DB_FILE = os.path.join(_DATA_DIR, "board_flow.db")
 _WATCH_FILE = os.path.join(_DATA_DIR, "board_watch.json")
 _ETF_WATCH_FILE = os.path.join(_DATA_DIR, "etf_watch.json")
 _EM_CONFIG_FILE = os.path.join(_DATA_DIR, "em_flow_config.json")
+_EM_CONCEPT_CONFIG_FILE = os.path.join(_DATA_DIR, "em_flow_concept_config.json")
 
 # 保留窗口（交易日）
 KEEP_POINT_DAYS = 30
@@ -1112,10 +1113,15 @@ def extra_em_targets(rank: list[dict], watch: list[dict],
     return out
 
 
-def load_em_config() -> dict:
-    """行业展示配置：{customized: bool, codes: [{code,name}]}；文件缺失即默认。"""
+def _em_config_path(kind: str = "industry") -> str:
+    """行业与概念各有一份展示配置（互不影响）。"""
+    return _EM_CONCEPT_CONFIG_FILE if kind == "concept" else _EM_CONFIG_FILE
+
+
+def load_em_config(kind: str = "industry") -> dict:
+    """板块展示配置（行业/概念各一份）：{customized: bool, items: [{code,name}]}。"""
     try:
-        with open(_EM_CONFIG_FILE, encoding="utf-8") as f:
+        with open(_em_config_path(kind), encoding="utf-8") as f:
             raw = json.load(f)
     except FileNotFoundError:
         return {"customized": False, "items": []}
@@ -1130,16 +1136,17 @@ def load_em_config() -> dict:
     return {"customized": bool((raw or {}).get("customized")), "items": items}
 
 
-def save_em_config(config: dict) -> bool:
-    tmp = f"{_EM_CONFIG_FILE}.{os.getpid()}.{threading.get_ident()}.tmp"
+def save_em_config(config: dict, kind: str = "industry") -> bool:
+    path = _em_config_path(kind)
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
     try:
         os.makedirs(_DATA_DIR, exist_ok=True)
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(config, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, _EM_CONFIG_FILE)
+        os.replace(tmp, path)
         return True
     except OSError as exc:
-        log.warning("写入 4 维行业配置失败: %s", exc)
+        log.warning("写入 4 维板块配置失败: %s", exc)
         return False
 
 
