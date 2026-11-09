@@ -62,6 +62,31 @@ class TestParseConfig:
         assert errs == []
         assert cfg["server"] == push.DEFAULT_BARK_SERVER
 
+    @pytest.mark.parametrize("server", [
+        "https://127.0.0.1:8443",
+        "https://[::1]:8443",
+        "https://localhost:8443",
+        "https://api.local",
+        "https://192.168.1.10",
+        "https://169.254.169.254",
+        "https://0.0.0.0",
+    ])
+    def test_bark_rejects_loopback_and_private_server(self, server):
+        """自建 Bark 只放行公网 https：/api/push/test 会按配置发请求，不能变成 SSRF 打点。"""
+        cfg, errs = push.parse_config(
+            {"channel": "bark", "key": "AbCdEf123456", "server": server})
+        assert any("内网" in e for e in errs), server
+
+    @pytest.mark.parametrize("server", [
+        "https://api.day.app",
+        "https://bark.my-domain.com",
+        "https://bark.example.cn:8443",
+    ])
+    def test_bark_allows_public_https_server(self, server):
+        cfg, errs = push.parse_config(
+            {"channel": "bark", "key": "AbCdEf123456", "server": server})
+        assert errs == [], server
+
     def test_wecom_requires_official_webhook(self):
         cfg, errs = push.parse_config({"channel": "wecom"})
         assert any("Webhook" in e for e in errs)

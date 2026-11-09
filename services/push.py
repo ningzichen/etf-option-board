@@ -78,6 +78,37 @@ def _boolish(value) -> tuple[bool, bool]:
     return False, False
 
 
+def _is_public_https_host(url: str) -> bool:
+    """URL 是否指向公网 https 主机（拒绝本机/内网/保留地址）。纯函数，不做 DNS 解析。
+
+    只按字面判断：IP 字面量走 `ipaddress` 分类，域名拒绝 `localhost` 与 `.local`
+    `.internal` `.lan` `.localhost` 后缀。DNS 重绑定（域名解析到内网）不在此覆盖范围，
+    因为校验发生在配置保存时、解析发生在发送时，二者无法原子对应。
+    """
+    from urllib.parse import urlsplit
+    import ipaddress
+
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return False
+    if parts.scheme != "https" or not parts.hostname:
+        return False
+    host = parts.hostname.lower().rstrip(".")
+    if host in ("localhost", "localhost.localdomain"):
+        return False
+    if host.endswith((".local", ".internal", ".lan", ".localhost", ".home")):
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return True  # 普通域名：放行（自建 Bark 常见）
+    return not (
+        ip.is_private or ip.is_loopback or ip.is_link_local
+        or ip.is_reserved or ip.is_unspecified or ip.is_multicast
+    )
+
+
 def parse_config(raw) -> tuple[dict, list[str]]:
     """校验并归一化推送配置，返回 (配置, 错误列表)。纯函数：不读文件不读时钟。"""
     if not isinstance(raw, dict):
@@ -120,6 +151,10 @@ def parse_config(raw) -> tuple[dict, list[str]]:
             errors.append("Bark 需要填写设备 Key")
         if not server.startswith("https://"):
             errors.append("Bark 服务器必须是 https:// 地址")
+        elif not _is_public_https_host(server):
+            # 允许自建 Bark（任意公网 https），但不允许指向本机/内网：
+            # /api/push/test 会按配置发起请求，放任内网地址等于开放一个 SSRF 打点。
+            errors.append("Bark 服务器不能指向本机或内网地址")
     elif channel == "wecom":
         if not url:
             errors.append("企业微信需要填写机器人 Webhook 地址")
