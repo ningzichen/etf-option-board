@@ -1354,7 +1354,21 @@ async def em_flow_config_add(code: str = Query(...), name: str = Query(""),
     if not code.startswith("BK"):
         return {"error": "板块代码必须是 BK 开头"}
     cfg = await asyncio.to_thread(bf.load_em_config, kind)
-    items = cfg["items"] if cfg.get("customized") else []
+    items = cfg["items"] if (cfg.get("customized") and cfg.get("items")) else []
+    if not items:
+        # 尚未自定义（或刚重置）：以当前默认展示（Top N）为起点，
+        # 否则第一次添加会把默认内容整个替换掉，用户会以为「重置后被清空」。
+        try:
+            dates = await asyncio.to_thread(bf.available_dates, 1)
+        except Exception:  # noqa: BLE001
+            dates = []
+        date = dates[0] if dates else dt.date.today().isoformat()
+        try:
+            rank = await asyncio.to_thread(bf.read_rank, date, kind)
+        except Exception:  # noqa: BLE001
+            rank = []
+        pick = bf.pick_em_concepts if kind == "concept" else bf.pick_em_industries
+        items = [{"code": it["code"], "name": it["name"]} for it in pick(rank)]
     if not any(it["code"] == code for it in items):
         items.append({"code": code, "name": name or code})
     if not await asyncio.to_thread(bf.save_em_config, {"customized": True, "items": items}, kind):
