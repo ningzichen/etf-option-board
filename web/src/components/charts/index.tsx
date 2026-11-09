@@ -765,7 +765,7 @@ function NowMarker({
 
 export function MoneyLinesChart({
   id, axis, series, height = 320, maxLines = 8, vLines, endLabels = false,
-  extra = [], lineWidth = 1.4, nowX, linkGroup,
+  extra = [], lineWidth = 1.4, nowX, linkGroup, ghost = [],
 }: {
   id: string;
   axis: string[];
@@ -785,6 +785,8 @@ export function MoneyLinesChart({
   nowX?: string | null;
   /** 与副图共享同一 group：十字光标/竖线会同步到同组图表 */
   linkGroup?: string;
+  /** 幽灵线（前一交易日）：与主线同色、60% 透明度，不参与标签/悬停 */
+  ghost?: { code: string; name: string; values: (number | null)[] }[];
 }) {
   const shown = (series ?? []).slice(0, maxLines);
   const extras = extra ?? [];
@@ -834,7 +836,9 @@ export function MoneyLinesChart({
       axisLine: { show: false },
       axisTick: { show: false },
       axisLabel: {
-        color: AXIS, fontSize: 10, hideOverlap: true,
+        color: AXIS, fontSize: 10, hideOverlap: false,
+        // 显式指定哪些刻度要显示：ECharts 的 auto 抽稀会只留 2~3 个（09:30/11:00）
+        interval: vLines?.length ? 0 : (_i: number, v: string) => isHalfHour(v),
         // 多日模式：底部只按「日」显示（MM-DD）；单日模式：每半小时（09:30/10:00/10:30…）
         formatter: vLines?.length
           ? (v: string) => (vLines.includes(v) ? v.slice(0, 5) : "")
@@ -882,7 +886,21 @@ export function MoneyLinesChart({
         lineStyle: { width: focus ? lineWidth + 1.8 : s.watch ? lineWidth + 1 : lineWidth, opacity: dim ? 0.18 : 1, color },
         data: s.values,
       };
-    }).concat(extras.map((s, i) => ({
+    }).concat(ghost.map((g, i) => ({
+      name: g.name,
+      type: "line",
+      showSymbol: false,
+      smooth: false,
+      connectNulls: false,
+      silent: true,
+      z: 1,
+      lineStyle: {
+        width: Math.max(1, lineWidth - 0.3),
+        opacity: 0.6,
+        color: MONEY_COLORS[i % MONEY_COLORS.length],
+      },
+      data: g.values,
+    }))).concat(extras.map((s, i) => ({
       name: s.name,
       type: "line",
       yAxisIndex: i + 1,

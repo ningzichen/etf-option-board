@@ -1485,8 +1485,14 @@ async def em_flow_series(target_type: str = Query("index", description="index / 
         axis = dense
 
     meta = await asyncio.to_thread(bf.read_em_meta, date, code)
+    # 前一交易日（4 维本地库可用日期里，比当前日期早的最近一天）
+    try:
+        all_dates = await asyncio.to_thread(bf.available_dates, 60, "em")
+    except Exception:  # noqa: BLE001
+        all_dates = []
+    prev_date = next((d for d in sorted(all_dates, reverse=True) if d < date), "")
     out = {"date": date, "code": code, "kind": kind, "axis": axis, "dims": dims,
-           "name": meta.get("name") or code}
+           "name": meta.get("name") or code, "prev_date": prev_date}
     if not axis:
         out["error"] = ("该标的还没有 4 维分时点：自选/热门板块每 2 分钟自动纳入采集，稍后刷新即可；"
                         "概念/行业默认只采 |主力净流入| 前 40")
@@ -1498,10 +1504,11 @@ async def em_flow_volume(target_type: str = Query("index",
                                                   description="index / industry / concept / market / hot / custom"),
                          code: str = Query(...),
                          date: str | None = Query(None)):
-    """4 维资金页的成交量副图：当日与前一交易日的分钟成交量。
+    """4 维资金页的成交额副图：当日与前一交易日的**累计成交额**。
 
     数据源：东财 `push2his trends2`（支持板块 secid 90.BKxxxx 与指数），
-    f56 是该分钟的成交量（手），因此是「每分钟成交量」对比而不是累计。
+    f57 是该分钟的成交额（元），接口内累加成当日总量曲线，并给出两日净额
+    （今日总量 − 昨日总量）。
     """
     if not code:
         return {"axis": [], "today": [], "prev": [], "error": "code 不能为空"}
@@ -1526,7 +1533,7 @@ async def em_flow_volume(target_type: str = Query("index",
         ts = parts[0]
         day, hm = ts[:10], ts[11:16]
         try:
-            vol = float(parts[5] or 0)
+            vol = float(parts[6] or 0)   # f57 = 成交额（元）；f56 是成交量（手）
         except (TypeError, ValueError):
             vol = 0.0
         by_day.setdefault(day, {})[hm] = vol
@@ -1556,9 +1563,15 @@ async def em_flow_volume(target_type: str = Query("index",
             out.append(run)
         return out
 
+    today_cum = cumulative(today)
+    prev_cum = cumulative(prev)
+    today_total = today_cum[-1] if today_cum else 0.0
+    prev_total = prev_cum[-1] if prev_cum else 0.0
     return {"date": target, "prev_date": prev_day, "axis": axis,
-            "today": cumulative(today), "prev": cumulative(prev), "unit": "手",
-            "error": None if axis else "该日没有成交量分时"}
+            "today": today_cum, "prev": prev_cum, "unit": "元",
+            "today_total": today_total, "prev_total": prev_total,
+            "net_total": today_total - prev_total,
+            "error": None if axis else "该日没有成交额分时"}
 
 
 # --------------------------------------------------------------------------
