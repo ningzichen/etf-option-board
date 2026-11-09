@@ -11,6 +11,19 @@ export const api = {
   universe: () => get("/universe"),
   indices: () => get("/indices"),
   indexLevels: () => get("/index/levels"),
+  saveIndexManualLevels: async (body: { date: string; support: number; pressure: number }) => {
+    const r = await fetch(`${BASE}/index/manual-levels`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json().catch(() => ({} as any));
+    if (!r.ok || data?.ok === false) {
+      const msg = Array.isArray(data?.errors) ? data.errors.join("；") : "";
+      throw new Error(msg || `保存失败（HTTP ${r.status}）`);
+    }
+    return data;
+  },
   external: () => get("/external"),
   national: () => get("/national"),
   etfs: () => get("/etfs"),

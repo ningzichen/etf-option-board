@@ -17,7 +17,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from services import (alerts, board_collector as bcol, boardflow as bf, cls_hot,
                       decision,
                       pinyin as pinyin_svc,
-                      deploy as deploy_svc, em, index_levels, kronos, llm, llm_proxy,
+                      deploy as deploy_svc, em, index_levels,
+                      index_levels_manual as idxm, kronos, llm, llm_proxy,
                       market_service as ms, monitor, option_playbook as playbook,
                       option_service as osvc, push as push_svc, reversal, strategy, tape_flow as tf,
                       user_settings as usv,
@@ -94,13 +95,38 @@ async def indices():
 
 @router.get("/index/levels")
 async def index_levels_view():
-    """上证指数关键位（6 只 ETF 共用一份）+ 分时，供指数弹窗。"""
+    """上证指数关键位（6 只 ETF 共用一份）+ 分时，供指数弹窗。
+
+    `manual` 为用户手动填写的支撑/压力位（按交易日存、顺延生效），
+    已并入 `levels` 与 `total`，与自动位同规则计分。
+    """
     snap, tr = await asyncio.gather(
         index_levels.snapshot(), ms.trends("1.000001"))
     day = (tr[-1].get("time") or "")[:10] if tr else None
     return {**snap, "trends": tr, "trends_day": day,
             "trends_prev_close": (em.trend_prev_close("1.000001")
                                   if day and day != dt.date.today().isoformat() else None)}
+
+
+@router.put("/index/manual-levels")
+async def index_manual_levels_update(payload: dict):
+    """保存上证指数手动支撑/压力位。
+
+    body: {"date": "YYYY-MM-DD", "support": 3900, "pressure": 4000}
+    - `date` 取弹窗正在展示的指数分时交易日（前端传 trends_day；缺省用今天）；
+    - 必须两个都填、100–99999、支撑 < 压力，否则 400 + errors；
+    - 同一天重复保存为覆盖；每个交易日一条，顺延生效。
+    """
+    day = (payload or {}).get("date") or dt.date.today().isoformat()
+    record, errors = idxm.parse_record(payload, day=day)
+    if errors:
+        return JSONResponse({"ok": False, "errors": errors}, status_code=400)
+    if not idxm.save(record):
+        return {"ok": False, "errors": ["写入失败，请稍后重试"]}
+    index_levels.invalidate()
+    snap = await index_levels.snapshot(force=True)
+    return {"ok": True, "manual": snap.get("manual"),
+            "total": snap.get("total"), "levels": snap.get("levels")}
 
 
 @router.get("/etfs")

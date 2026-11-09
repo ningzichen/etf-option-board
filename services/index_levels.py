@@ -2,6 +2,11 @@
 
 9 只 ETF 共用同一份结果（30s 缓存），不按关联指数分别计算。仅用上证 000001，
 只用 20 日窗口（不含今日未完成日线），不引入 60/120 日阶段位。
+
+另叠加用户手动填写的支撑/压力位（`index_levels_manual`）：按交易日落盘、顺延生效，
+与自动位同规则计分（≤0.3% ±8、0.3–0.8% ±4），一起累加后仍整体 clamp ±15；
+手动位不参与突破/跌破判定。缓存只存取数结果，关键位每次按当前手动位重算，
+所以改完手动值立刻生效（`invalidate()` 用于强制刷新取数）。
 """
 
 from __future__ import annotations
@@ -11,11 +16,12 @@ import datetime as dt
 import math
 import time
 
-from services import em, market_service as ms
+from services import em, index_levels_manual as idxm, market_service as ms
 
 SECID = "1.000001"
 _TTL = 30
-_CACHE: tuple[float, dict] | None = None
+_CACHE: tuple[float, dict] | None = None   # (ts, 原始输入)
+
 
 
 def _pct(a: float, b: float) -> float | None:
@@ -47,8 +53,14 @@ async def _minute_closes() -> list[float]:
     return out
 
 
-def evaluate(prev: list[dict], last: float, mins: list[float]) -> dict:
-    """纯计算：给定「不含今日」的日线、最新点位与已收盘分钟收盘序列，产出关键位。"""
+def evaluate(prev: list[dict], last: float, mins: list[float],
+             manual: dict | None = None) -> dict:
+    """纯计算：给定「不含今日」的日线、最新点位与已收盘分钟收盘序列，产出关键位。
+
+    `manual` 为手动支撑/压力位（可选，形如 {"support": 3900, "pressure": 4000}）：
+    与自动位同规则计分（≤0.3% ±8、0.3–0.8% ±4），一起累加后整体 clamp ±15，
+    不参与突破/跌破判定；不传时行为与旧版完全一致。
+    """
     window = prev[-20:]
     enough = len(window) >= 5
     hist = [b["close"] for b in prev]
@@ -112,7 +124,23 @@ def evaluate(prev: list[dict], last: float, mins: list[float]) -> dict:
         if ma11:
             add("ma11", "MA11", ma11, "ma", _pct(last, ma11), 0.0)
 
-    total = round(max(-15.0, min(15.0, raw)), 1) if enough else 0.0
+    # 手动支撑/压力位：与自动位同一套距离规则，不判突破/跌破
+    if manual:
+        sup = manual.get("support")
+        if sup is not None:
+            d = _pct(last, sup)
+            c = (8.0 if d is not None and 0 <= d <= 0.3
+                 else 4.0 if d is not None and 0.3 < d <= 0.8 else 0.0)
+            add("manual_support", "手动支撑位", sup, "support", d, c)
+        pre = manual.get("pressure")
+        if pre is not None:
+            d = _pct_pressure(pre, last)
+            c = (-8.0 if d is not None and 0 <= d <= 0.3
+                 else -4.0 if d is not None and 0.3 < d <= 0.8 else 0.0)
+            add("manual_pressure", "手动压力位", pre, "pressure", d, c)
+
+    has_manual = any(l["key"].startswith("manual_") for l in levels)
+    total = round(max(-15.0, min(15.0, raw)), 1) if (enough or has_manual) else 0.0
     note = None
     if not enough:
         note = "历史不足 5 日，关键位不计分"
@@ -124,7 +152,8 @@ def evaluate(prev: list[dict], last: float, mins: list[float]) -> dict:
             "insufficient": not enough, "breakout": breakout, "breakdown": breakdown}
 
 
-async def snapshot(force: bool = False) -> dict:
+async def _inputs(force: bool = False) -> dict:
+    """取数（日线 45 根 / 实时报价 / 已收盘 1m 收盘），30s 缓存；只缓存原始输入。"""
     global _CACHE
     now = time.time()
     if not force and _CACHE and now - _CACHE[0] < _TTL:
@@ -139,19 +168,32 @@ async def snapshot(force: bool = False) -> dict:
     today = dt.date.today().isoformat()
     prev = [b for b in bars if str(b.get("date") or "")[:10] < today]
     last = (q or {}).get("price") or (prev[-1]["close"] if prev else None)
+    inp = {"prev": prev, "last": last, "mins": mins, "quote": q or {}}
+    _CACHE = (now, inp)
+    return inp
+
+
+def invalidate() -> None:
+    """丢掉取数缓存（保存手动位后调用，下一次 snapshot 立即回源）。"""
+    global _CACHE
+    _CACHE = None
+
+
+async def snapshot(force: bool = False) -> dict:
+    inp = await _inputs(force)
+    prev, last, q = inp["prev"], inp["last"], inp["quote"]
 
     if not prev or not last:
-        res = {"ok": False, "last": last, "total": 0.0, "levels": [],
-               "note": "日线数据不足", "insufficient": True,
-               "breakout": False, "breakdown": False,
-               "pct": (q or {}).get("pct")}
-        _CACHE = (now, res)
-        return res
+        return {"ok": False, "last": last, "total": 0.0, "levels": [],
+                "note": "日线数据不足", "insufficient": True,
+                "breakout": False, "breakdown": False, "manual": None,
+                "pct": q.get("pct")}
 
-    ev = evaluate(prev, last, mins)
-    res = {
+    manual = idxm.current()
+    ev = evaluate(prev, last, inp["mins"], manual)
+    return {
         "ok": True, "secid": SECID, "code": "000001", "name": "上证指数",
-        "last": last, "pct": (q or {}).get("pct"), "prev_close": (q or {}).get("prev_close"),
+        "last": last, "pct": q.get("pct"), "prev_close": q.get("prev_close"),
         "high20": round(ev["high20"], 2) if ev["high20"] else None,
         "low20": round(ev["low20"], 2) if ev["low20"] else None,
         "ma5": round(ev["ma5"], 2) if ev["ma5"] else None,
@@ -159,11 +201,10 @@ async def snapshot(force: bool = False) -> dict:
         "int_upper": ev["int_upper"], "int_lower": ev["int_lower"],
         "total": ev["total"], "levels": ev["levels"], "note": ev["note"],
         "insufficient": ev["insufficient"], "breakout": ev["breakout"],
-        "breakdown": ev["breakdown"],
+        "breakdown": ev["breakdown"], "manual": manual,
         "ts": dt.datetime.now().strftime("%H:%M:%S"),
     }
-    _CACHE = (now, res)
-    return res
+
 
 
 def factor_text(levels: dict) -> str | None:
