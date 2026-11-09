@@ -1300,7 +1300,11 @@ async def em_flow_targets(date: str | None = Query(None)):
 async def _em_board_list(date: str | None, board_type: str) -> dict:
     """板块（行业/概念）展示列表 + 全量候选（含最新主力净流入与涨跌幅）。
 
-    行业有自定义展示配置（`em_flow_config.json`），概念固定按 |主力净流入| 取前 N。
+    展示顺序（未自定义时）：
+      1) 自定义（`data/board_watch.json`）中属于本口径的板块；
+      2) 「热门」（财联社热门板块）中属于本口径的板块；
+      3) 不足 Top N 时，用当日板块资金排行按 |主力净流入| 从高到低补齐。
+    有自定义配置（配置弹窗里加过）时以配置为准。
     """
     if not date:
         try:
@@ -1314,10 +1318,48 @@ async def _em_board_list(date: str | None, board_type: str) -> dict:
         return {"date": date, "display": [], "all": [], "error": str(exc)}
 
     limit = bf.EM_DEFAULT_CONCEPTS if board_type == "concept" else bf.EM_DEFAULT_INDUSTRIES
-    pick = bf.pick_em_concepts if board_type == "concept" else bf.pick_em_industries
     cfg = await asyncio.to_thread(bf.load_em_config, board_type)
     by = {r["code"]: r for r in rank}
-    base = cfg["items"] if cfg.get("customized") and cfg["items"] else pick(rank)
+
+    if cfg.get("customized") and cfg["items"]:
+        base = cfg["items"]
+    else:
+        # 默认 = 自定义 ∪ 热门，再按 |资金| 补齐到 Top N
+        base: list[dict] = []
+        seen: set[str] = set()
+
+        def add(code: str, name: str = "") -> None:
+            if code in seen or code not in by:
+                return
+            row = by[code]
+            if row.get("type") != board_type:
+                return
+            seen.add(code)
+            base.append({"code": code, "name": name or row.get("name") or code})
+
+        try:
+            watch = await asyncio.to_thread(bf.load_watch)
+        except Exception:  # noqa: BLE001
+            watch = []
+        for w in watch:
+            add(str(w.get("code") or ""), w.get("name") or "")
+
+        try:
+            boards = [{"code": r["code"], "name": r["name"], "kind": r.get("type"),
+                       "flow": r.get("flow"), "pct": r.get("pct"),
+                       "speed": r.get("speed") or 0}
+                      for r in rank if str(r.get("code", "")).startswith("BK")]
+            hot = await cls_hot.hot_boards(boards)
+            for it in hot.get("items") or []:
+                add(str(it.get("code") or ""), it.get("name") or "")
+        except Exception:  # noqa: BLE001 — 热门拉不到不影响默认列表
+            pass
+
+        if len(base) < limit:
+            for r in sorted(rank, key=lambda x: -abs(float(x.get("flow") or 0))):
+                if len(base) >= limit:
+                    break
+                add(r["code"], r.get("name") or "")
 
     def enrich(it: dict) -> dict:
         r = by.get(it["code"]) or {}
@@ -1356,19 +1398,13 @@ async def em_flow_config_add(code: str = Query(...), name: str = Query(""),
     cfg = await asyncio.to_thread(bf.load_em_config, kind)
     items = cfg["items"] if (cfg.get("customized") and cfg.get("items")) else []
     if not items:
-        # 尚未自定义（或刚重置）：以当前默认展示（Top N）为起点，
+        # 尚未自定义（或刚重置）：以「当前默认展示列表」为起点（自定义 ∪ 热门 ∪ Top N 补齐），
         # 否则第一次添加会把默认内容整个替换掉，用户会以为「重置后被清空」。
         try:
-            dates = await asyncio.to_thread(bf.available_dates, 1)
-        except Exception:  # noqa: BLE001
-            dates = []
-        date = dates[0] if dates else dt.date.today().isoformat()
-        try:
-            rank = await asyncio.to_thread(bf.read_rank, date, kind)
-        except Exception:  # noqa: BLE001
-            rank = []
-        pick = bf.pick_em_concepts if kind == "concept" else bf.pick_em_industries
-        items = [{"code": it["code"], "name": it["name"]} for it in pick(rank)]
+            cur = await _em_board_list(None, kind)
+            items = [{"code": it["code"], "name": it["name"]} for it in cur.get("display") or []]
+        except Exception:  # noqa: BLE001 — 拿不到就用空列表，至少不阻断添加
+            items = []
     if not any(it["code"] == code for it in items):
         items.append({"code": code, "name": name or code})
     if not await asyncio.to_thread(bf.save_em_config, {"customized": True, "items": items}, kind):

@@ -65,10 +65,11 @@ export function EmFlowPage() {
   const interval = 30_000;
 
   const { data: targets } = usePolling(() => api.emFlowTargets(), 60_000, [], { kind: "ctx", code: "em-targets" });
+  // 展示列表默认来自「自定义 + 热门」，变化快，不挂 IndexedDB 缓存（否则改完要等 5 分钟）
   const { data: industries, refresh: refreshIndustries } = usePolling(
-    () => api.emFlowIndustries(), 300_000, [], { kind: "ctx", code: "em-industries" });
+    () => api.emFlowIndustries(), 120_000, []);
   const { data: concepts, refresh: refreshConcepts } = usePolling(
-    () => api.emFlowConcepts(), 300_000, [], { kind: "ctx", code: "em-concepts" });
+    () => api.emFlowConcepts(), 120_000, []);
   // 财联社「热门板块」（热门行业/概念 + 异动）→ 后端模糊匹配到本地板块。
   // forceHot：只有「刷新」按钮才置 true → 请求带 force=1 绕过后端缓存回源财联社
   const forceHot = useRef(false);
