@@ -1372,3 +1372,89 @@ export function BoardFlowChart({
     </div>
   );
 }
+
+/** 成交量对比副图：当日 vs 前一交易日的每分钟成交量（万手）。 */
+export function VolumeCompareChart({
+  id, axis, today, prev, height = 150, prevDate, date,
+}: {
+  id: string;
+  axis: string[];
+  today: (number | null)[];
+  prev: (number | null)[];
+  height?: number | string;
+  date?: string;
+  prevDate?: string;
+}) {
+  const toWan = (v: number | null) => (v == null ? null : Math.round((v / 1e4) * 100) / 100);
+  const option = useMemo(() => ({
+    animation: false,
+    grid: { left: 54, right: LABEL_GUTTER, top: 6, bottom: 20 },
+    tooltip: {
+      trigger: "axis",
+      axisPointer: { type: "cross" },
+      backgroundColor: "rgba(24,24,27,0.95)",
+      borderColor: "rgba(255,255,255,0.12)",
+      textStyle: { color: "#e4e4e7", fontSize: 11 },
+      formatter: (ps: any[]) => {
+        if (!ps?.length) return "";
+        const rows = ps.map((p) =>
+          `<div style="display:flex;justify-content:space-between;gap:14px">
+             <span>${p.marker}${p.seriesName}</span>
+             <span>${p.value == null ? "—" : `${p.value} 万手`}</span>
+           </div>`).join("");
+        return `<div style="margin-bottom:4px">${ps[0].axisValue}</div>${rows}`;
+      },
+    },
+    legend: { show: false },
+    xAxis: {
+      type: "category",
+      data: axis,
+      boundaryGap: false,
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: {
+        color: "#71717a", fontSize: 9, hideOverlap: true,
+        formatter: (v: string) => (isHalfHour(v) ? v : ""),
+      },
+    },
+    yAxis: {
+      type: "value",
+      scale: true,
+      name: "万手",
+      nameTextStyle: { color: "#71717a", fontSize: 9 },
+      axisLabel: { color: "#71717a", fontSize: 9 },
+      splitLine: { lineStyle: { color: "rgba(255,255,255,0.06)", type: "dashed" } },
+    },
+    series: [
+      {
+        name: `今日 ${date ?? ""}`.trim(),
+        type: "line",
+        data: today.map(toWan),
+        showSymbol: false,
+        lineStyle: { width: 1.4, color: "#3b82f6" },
+        itemStyle: { color: "#3b82f6" },
+        z: 3,
+      },
+      {
+        name: `昨日 ${prevDate ?? ""}`.trim(),
+        type: "line",
+        data: prev.map(toWan),
+        showSymbol: false,
+        lineStyle: { width: 1.2, color: "#9ca3af", type: "dashed" },
+        itemStyle: { color: "#9ca3af" },
+        z: 2,
+        markLine: {
+          symbol: "none",
+          silent: true,
+          label: { show: false },
+          data: axis.filter((t) => isHalfHour(t)).map((t) => ({
+            xAxis: t, lineStyle: { color: "#6b7280", type: [4, 4], width: 1 },
+          })),
+        },
+      },
+    ],
+  }), [axis, today, prev, date, prevDate]);
+
+  if (!axis.length) return null;
+  return <ReactECharts key={id} option={option} notMerge style={{ height }} />;
+}

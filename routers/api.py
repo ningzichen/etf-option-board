@@ -1485,6 +1485,60 @@ async def em_flow_series(target_type: str = Query("index", description="index / 
     return out
 
 
+@router.get("/em-flow/volume")
+async def em_flow_volume(target_type: str = Query("index",
+                                                  description="index / industry / concept / market / hot / custom"),
+                         code: str = Query(...),
+                         date: str | None = Query(None)):
+    """4 维资金页的成交量副图：当日与前一交易日的分钟成交量。
+
+    数据源：东财 `push2his trends2`（支持板块 secid 90.BKxxxx 与指数），
+    f56 是该分钟的成交量（手），因此是「每分钟成交量」对比而不是累计。
+    """
+    if not code:
+        return {"axis": [], "today": [], "prev": [], "error": "code 不能为空"}
+    kind = target_type if target_type in ("index", "industry", "concept") else "index"
+    secid = code if not code.startswith("BK") else f"90.{code}"
+    try:
+        d = await em.get_json(
+            "https://push2his.eastmoney.com/api/qt/stock/trends2/get",
+            {"secid": secid,
+             "fields1": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13",
+             "fields2": "f51,f52,f53,f54,f55,f56,f57,f58",
+             "ndays": 5, "iscr": 0, "ut": em._UT},
+            ttl=30.0, tries=2)
+    except Exception as exc:  # noqa: BLE001
+        return {"axis": [], "today": [], "prev": [], "error": str(exc)}
+    trends = ((d or {}).get("data") or {}).get("trends") or []
+    by_day: dict[str, dict[str, float]] = {}
+    for line in trends:
+        parts = str(line).split(",")
+        if len(parts) < 6 or len(parts[0]) < 16:
+            continue
+        ts = parts[0]
+        day, hm = ts[:10], ts[11:16]
+        try:
+            vol = float(parts[5] or 0)
+        except (TypeError, ValueError):
+            vol = 0.0
+        by_day.setdefault(day, {})[hm] = vol
+    if not by_day:
+        return {"axis": [], "today": [], "prev": [], "error": "上游没有分时成交量"}
+
+    days = sorted(by_day)
+    target = date if date in by_day else days[-1]
+    earlier = [d0 for d0 in days if d0 < target]
+    prev_day = earlier[-1] if earlier else ""
+
+    axis = sorted(by_day[target])
+    today = [by_day[target][t] for t in axis]
+    prev_map = by_day.get(prev_day, {}) if prev_day else {}
+    prev = [prev_map.get(t) for t in axis]
+    return {"date": target, "prev_date": prev_day, "axis": axis,
+            "today": today, "prev": prev, "unit": "手",
+            "error": None if axis else "该日没有成交量分时"}
+
+
 # --------------------------------------------------------------------------
 # 全A逐笔分档（资金流向页）：通达信 / Wind 两套口径
 # --------------------------------------------------------------------------

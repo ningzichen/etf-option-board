@@ -6,7 +6,7 @@ import { Badge } from "@/components/reui/badge";
 import { Dialog, EmptyState, Skeleton, Tabs } from "@/components/ui/misc";
 import { FlowListPanel, type SortKey } from "@/components/FlowListPanel";
 import { DayTag } from "@/components/DayTag";
-import { MoneyLinesChart } from "@/components/charts";
+import { MoneyLinesChart, VolumeCompareChart } from "@/components/charts";
 import { BoardDetailDrawer } from "@/components/BoardDetailDrawer";
 import { api } from "@/lib/api";
 import { usePolling } from "@/lib/usePolling";
@@ -230,6 +230,14 @@ export function EmFlowPage() {
     }
   };
 
+  // 成交量副图（当日 vs 前一交易日，分钟级）
+  const { data: volume } = usePolling(
+    () => (effectiveCode ? api.emFlowVolume(seriesKind, effectiveCode, series?.date) : Promise.resolve(null)),
+    interval,
+    [seriesKind, effectiveCode, series?.date, interval],
+    { kind: "emseries", code: `vol:${seriesKind}:${effectiveCode}` },
+  );
+
   const nameOf = useMemo(
     () => options.find((o) => o.code === effectiveCode)?.name ?? effectiveCode,
     [options, effectiveCode],
@@ -348,9 +356,34 @@ export function EmFlowPage() {
                 {!dimSeries.length ? (
                   <EmptyState title="暂无 4 维数据" hint={series.error ?? "该标的当日还没有累积到分时点"} className="flex-1" />
                 ) : (
-                  <div className="min-h-0 flex-1">
-                    <MoneyLinesChart id={`em-${seriesKind}-${effectiveCode}`} axis={series.axis}
-                      series={dimSeries as any} height="100%" maxLines={5} endLabels />
+                  <div className="flex min-h-0 flex-1 flex-col">
+                    <div className="min-h-0 flex-[3]">
+                      <MoneyLinesChart id={`em-${seriesKind}-${effectiveCode}`} axis={series.axis}
+                        series={dimSeries as any} height="100%" maxLines={5} endLabels />
+                    </div>
+                    <div className="mt-1 border-t border-border/40 pt-1">
+                      <div className="flex items-center gap-3 px-1 pb-0.5 text-[10px] text-muted-foreground">
+                        <span className="font-medium">成交量</span>
+                        <span className="inline-flex items-center gap-1">
+                          <span className="inline-block h-0.5 w-3 rounded bg-[#3b82f6]" />今日 {volume?.date ?? series?.date ?? ""}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <span className="inline-block h-0.5 w-3 border-t border-dashed border-[#9ca3af]" />昨日 {volume?.prev_date ?? "—"}
+                        </span>
+                        {!volume?.axis?.length && <span>（暂无成交量分时）</span>}
+                      </div>
+                      <div className="h-[140px]">
+                        <VolumeCompareChart
+                          id={`vol-${seriesKind}-${effectiveCode}`}
+                          axis={volume?.axis ?? []}
+                          today={volume?.today ?? []}
+                          prev={volume?.prev ?? []}
+                          date={volume?.date}
+                          prevDate={volume?.prev_date}
+                          height="100%"
+                        />
+                      </div>
+                    </div>
                   </div>
                 )}
                 <div className="mt-1 flex flex-wrap items-center justify-between gap-2 px-1 text-[10px] text-muted-foreground">

@@ -130,8 +130,10 @@ export const api = {
   emFlowTargets: () => get("/em-flow/targets"),
   emFlowIndustries: () => get("/em-flow/industries"),
   emFlowConcepts: () => get("/em-flow/concepts"),
-  emFlowSeries: (kind: string, code: string) =>
-    get(`/em-flow/series?target_type=${kind}&code=${encodeURIComponent(code)}`),
+  emFlowSeries: (kind: string, code: string, date?: string) =>
+    get(`/em-flow/series?target_type=${kind}&code=${encodeURIComponent(code)}${date ? `&date=${date}` : ""}`),
+  emFlowVolume: (kind: string, code: string, date?: string) =>
+    get(`/em-flow/volume?target_type=${kind}&code=${encodeURIComponent(code)}${date ? `&date=${date}` : ""}`),
   emFlowConfigAdd: async (code: string, name: string, kind = "industry") =>
     (await fetch(`${BASE}/em-flow/config/add?code=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}&kind=${kind}`,
       { method: "POST" })).json(),

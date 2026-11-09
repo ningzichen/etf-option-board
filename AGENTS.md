@@ -300,6 +300,10 @@ bash web/dev.sh       # 前端开发模式 :5273（/api 代理到 :6799）
   不足 Top N（40）再用当日板块资金排行按 |主力净流入| 补齐；有配置时以配置为准。
   因此 `emFlowIndustries/Concepts` 的 usePolling **不要挂 IndexedDB 缓存**（会停在几分钟前的名单）。
   配置弹窗首次添加也以这份默认列表为起点（`_em_board_list` 的 display），不要把默认项清掉。
+  **成交量副图（2026-11-09）**：四维分时图下方对比「当日 vs 前一交易日」每分钟成交量，
+  数据来自 `/api/em-flow/volume`（东财 `push2his trends2`，`ndays=5` 取最近 5 天，
+  f56 就是每分钟成交量，**不是累计**）。板块用 `90.BKxxxx`，指数用原 secid；
+  前端 `VolumeCompareChart` 右留白与主图一致（`LABEL_GUTTER`），两图列对齐。
 - **「今日」按钮（2026-11-06）**：工作日 **09:15 之后**（集合竞价开始）一律落到当天日期本身，
   即使库里最新还停在上一交易日（数据 09:30 才开始采集）；之前/周末落到库内最新交易日。
   判定用 `web/src/lib/format.ts` 的 `afterPreOpen()`/`todayStr()`，`isLiveDay()` 同步把
