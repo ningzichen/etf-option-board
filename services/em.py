@@ -663,28 +663,62 @@ async def kline(secid: str, klt: int = 1, lmt: int = 240, fqt: int = 1,
     return parse_klines(d.get("data"))
 
 
+def parse_day_series(rows: list, ndays: int = 5) -> list[dict]:
+    """把腾讯 day/query 的 data 列表解析成**按日期升序**的分钟累计成交额序列。
+
+    以数据源自身排序为准：腾讯返回的是新→旧，这里统一升序再取最近 ndays 天，
+    避免「取最后 N 条」实际取到最旧的几天（曾因此把前 4 天的成交量当今日比）。
+    """
+    out = []
+    for day in rows or []:
+        date = str(day.get("date") or "")
+        if len(date) != 8:
+            continue
+        points = []
+        for line in day.get("data") or []:
+            p = str(line).split()
+            if len(p) > 3:
+                amt = _numf(p[3])
+                if amt > 0:
+                    points.append((p[0], amt))
+        if points:
+            out.append({"date": f"{date[0:4]}-{date[4:6]}-{date[6:8]}",
+                        "points": points})
+    out.sort(key=lambda d: d["date"])
+    return out[-max(1, ndays):]
+
+
+async def day_series(secid: str, ndays: int = 5, ttl: float = 60.0,
+                     bust: bool = False) -> list[dict]:
+    """最近 N 个交易日的**分钟级累计成交额**（腾讯 day/query）。
+
+    腾讯 day/query 每天给一串 "HHMM 价格 累计成交量 累计成交额"，
+    返回 [{"date": "YYYY-MM-DD", "points": [(hhmm, 累计成交额元), ...]}]，按日期升序。
+    指数成交额即该市场总额（沪市/深市），是全A成交额同比因子的数据源。
+
+    `bust=True` 会在 query 里带一个时间戳参数：腾讯的边缘节点偶尔回上一天
+    的缓存（盘中会拿到缺今天的 5 日窗口），靠它绕开 CDN 缓存重取。
+    """
+    code = _tx_code(secid)
+    if not code:
+        return []
+    params = {"code": code}
+    if bust:
+        params["_"] = str(int(time.time() * 1000))
+    d = await get_json(_TX_TREND_DAYS, params, ttl=ttl)
+    node = ((d or {}).get("data") or {}).get(code) or {}
+    return parse_day_series(node.get("data") or [], ndays)
+
+
 async def day_amounts(secid: str, ndays: int = 5, ttl: float = 120.0) -> list[dict]:
     """最近 N 个交易日的累计成交额（腾讯 day/query）。
 
     腾讯日 K（fqkline）只给成交量、amount 恒为 0；day/query 的每行是
     "HHMM 价格 累计成交量 累计成交额"，取每天最后一笔即得当日成交额。
     """
-    code = _tx_code(secid)
-    if not code:
-        return []
-    d = await get_json(_TX_TREND_DAYS, {"code": code}, ttl=ttl)
-    node = ((d or {}).get("data") or {}).get(code) or {}
-    out = []
-    for day in (node.get("data") or [])[-max(1, ndays):]:
-        date = str(day.get("date") or "")
-        amt = 0.0
-        for line in day.get("data") or []:
-            p = str(line).split()
-            if len(p) > 3:
-                amt = max(amt, _numf(p[3]))
-        if len(date) == 8 and amt > 0:
-            out.append({"date": f"{date[0:4]}-{date[4:6]}-{date[6:8]}", "amount": amt})
-    return out
+    series = await day_series(secid, ndays=ndays, ttl=ttl)
+    return [{"date": d["date"], "amount": max(a for _, a in d["points"])}
+            for d in series if d["points"]]
 
 
 def _trends_trim(out: list[dict], ndays: int) -> list[dict]:
