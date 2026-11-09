@@ -9,7 +9,7 @@ import { FlowEndLabels, type EndLabelItem } from "@/components/charts/endLabels"
 import { cn } from "@/lib/utils";
 
 /** 把图表加入同一 ECharts group：同一 group 的实例会同步十字光标/竖线与 tooltip。 */
-function joinGroup(chart: any, group?: string) {
+export function joinGroup(chart: any, group?: string) {
   if (!chart || !group || chart.isDisposed?.()) return;
   try {
     chart.group = group;
@@ -1481,7 +1481,7 @@ export function BoardFlowChart({
 
 /** 成交量对比副图：当日 vs 前一交易日的每分钟成交量（万手）。 */
 export function VolumeCompareChart({
-  id, axis, today, prev, height = 150, prevDate, date, linkGroup,
+  id, axis, today, prev, height = 150, prevDate, date, linkGroup, gutterLeft = 54,
 }: {
   id: string;
   axis: string[];
@@ -1492,12 +1492,14 @@ export function VolumeCompareChart({
   prevDate?: string;
   /** 与主图共享同一 group：十字光标/竖线会同步 */
   linkGroup?: string;
+  /** 左边距：主图叠加价格轴后会变宽，副图要跟着对齐 */
+  gutterLeft?: number;
 }) {
   // 成交额（元）→ 亿元，保留两位
   const toYi = (v: number | null) => (v == null ? null : Math.round((v / 1e8) * 100) / 100);
   const option = useMemo(() => ({
     animation: false,
-    grid: { left: 54, right: LABEL_GUTTER, top: 6, bottom: 20 },
+    grid: { left: gutterLeft, right: LABEL_GUTTER, top: 6, bottom: 20 },
     tooltip: {
       trigger: "axis",
       axisPointer: { type: "cross" },
@@ -1571,11 +1573,16 @@ export function VolumeCompareChart({
         },
       },
     ],
-  }), [axis, today, prev, date, prevDate]);
+  }), [axis, today, prev, date, prevDate, gutterLeft]);
+
+  const chartRef = useRef<any>(null);
+  useEffect(() => {
+    joinGroup(chartRef.current, linkGroup);
+  }, [linkGroup]);
 
   if (!axis.length) return null;
   return (
     <ReactECharts key={id} option={option} notMerge style={{ height }}
-      onChartReady={(c: any) => joinGroup(c, linkGroup)} />
+      onChartReady={(c: any) => { chartRef.current = c; joinGroup(c, linkGroup); }} />
   );
 }

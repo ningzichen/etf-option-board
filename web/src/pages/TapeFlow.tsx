@@ -152,6 +152,9 @@ export function TapeFlowPage() {
     .map((p, i) => ({ p, color: PRICE_COLORS[i % PRICE_COLORS.length] }))
     .filter(({ p }) => showPrice[p.key] !== false)
     .map(({ p, color }) => ({ code: p.key, name: p.name, values: p.values, color }));
+  // 叠加价格线各占一根左侧 Y 轴（MoneyLinesChart 的 axisBand=46），副图要同步左边距
+  const mainGutterLeft = 54 + extra.length * 46;
+  const linkGroup = `tape-${data?.date ?? "na"}-${preset}`;
   const meta = data?.meta ?? {};
   const updated = meta.updated_at || health?.state?.last_run || "";
   const err = data?.error;
@@ -383,6 +386,7 @@ export function TapeFlowPage() {
                 height="100%"
                 endLabels
                 nowX={liveNow ? nowLabel : null}
+                linkGroup={linkGroup}
               />
             </div>
             <div className="mt-1 shrink-0 border-t border-border/40 pt-1">
@@ -413,6 +417,8 @@ export function TapeFlowPage() {
                   date={turnover?.date}
                   prevDate={turnover?.prev_date}
                   height="100%"
+                  linkGroup={linkGroup}
+                  gutterLeft={mainGutterLeft}
                 />
               </div>
             </div>
