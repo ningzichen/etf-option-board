@@ -14,7 +14,7 @@ import pytest
 from services import em, kronos
 
 
-async def _no_addr(host: str) -> None:
+async def _no_addr(host: str, deadline: float | None = None) -> None:
     """跳过 DoH 解析，让用例不碰网络。"""
     return None
 
@@ -114,7 +114,7 @@ def test_backlog_does_not_starve_other_transports(monkeypatch):
         await v6.acquire()
         await v6.acquire()          # IPv6 通道积压
 
-        async def fake_curl(url, params=None, referer=None, headers=None):
+        async def fake_curl(url, params=None, referer=None, headers=None, deadline=None):
             return {"hot": True}
 
         monkeypatch.setattr(em, "_curl_json", fake_curl)
