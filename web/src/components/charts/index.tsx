@@ -796,8 +796,7 @@ export function MoneyLinesChart({
   const gutterLeft = 54 + extras.length * axisBand;
   const extraColor = (s: { color?: string }, i: number) => s.color ?? EXTRA_COLORS[i % EXTRA_COLORS.length];
   const [chart, setChart] = useState<any>(null);
-  // 悬停右侧标签 → 对应分时线加粗并变红/绿，其余淡出（与主力资金分时一致）
-  const [hoverCode, setHoverCode] = useState<string | null>(null);
+
   // 轮询/刷新会 setOption(notMerge)，ECharts 会顺带清掉十字光标与 tooltip；
   // 记住「鼠标在图上、停在第几个点」，每次 option 更新后补发一次 showTip。
   const hoverIdxRef = useRef<number | null>(null);
@@ -942,7 +941,6 @@ export function MoneyLinesChart({
         color: MONEY_COLORS[i % MONEY_COLORS.length],
         coord: [idx, v],
         weight: Math.abs(v),
-        active: hoverCode === s.code,
       });
     });
     // 幽灵线（前一日）也出标签：同色、文案后缀「昨」
@@ -963,7 +961,7 @@ export function MoneyLinesChart({
       });
     });
     return out;
-  }, [shown, extras, endLabels, ghost, hoverCode]);
+  }, [shown, extras, endLabels, ghost]);
 
   // 参考线：半小时竖虚线（单日）/ 日分隔线（多日）+ y=0 横线
   const withGuides = (opt: any) => {
@@ -1000,26 +998,14 @@ export function MoneyLinesChart({
     return () => window.removeEventListener("resize", onResize);
   }, [chart]);
 
-  // 悬停某条线：用 highlight/downplay（配合 emphasis.focus=series），不重建 option
+  // 只在「option 真的换了」（数据刷新）时补发一次 tooltip；
+  // 悬停导致的普通重渲染绝不能补发，否则 showTip 反复触发 → 十字线/标签闪烁。
+  const lastOptionRef = useRef<any>(null);
   useEffect(() => {
     if (!chart || chart.isDisposed?.()) return;
-    try {
-      chart.dispatchAction({ type: "downplay" });
-      if (hoverCode) {
-        const idx = shown.findIndex((x) => x.code === hoverCode);
-        if (idx >= 0) chart.dispatchAction({ type: "highlight", seriesIndex: idx });
-      }
-    } catch {
-      /* 实例可能刚被销毁 */
-    }
-  }, [chart, hoverCode, shown]);
-
-  // option 更新（轮询刷新）后，如果鼠标还在图上，把 tooltip/十字光标重新点亮
-  useEffect(() => {
-    if (!chart || chart.isDisposed?.()) return;
+    if (lastOptionRef.current === option) return;
+    lastOptionRef.current = option;
     if (!insideRef.current || hoverIdxRef.current == null) return;
-    const i = hoverIdxRef.current;
-    // 数据可能晚到（轮询请求 ~1s），分几个时间点补发，确保最后一次 setOption 之后仍点亮
     const timers = [60, 700].map((delay) => setTimeout(() => {
       try {
         if (!chart.isDisposed?.() && insideRef.current && hoverIdxRef.current != null) {
@@ -1030,10 +1016,10 @@ export function MoneyLinesChart({
       }
     }, delay));
     return () => timers.forEach(clearTimeout);
-  });  // 不设 deps：父组件任何一次重渲染（轮询）都会 setOption 清掉 tooltip，逐次补发
+  }, [chart, option]);
 
   if (!axis.length) return null;
-  const labelVersion = `${axis.length}:${shown.map((x) => x.code).join(",")}|${extras.map((x) => x.code).join(",")}`;
+  const labelVersion = `${axis.length}:${shown.map((x) => x.code).join(",")}|${extras.map((x) => x.code).join(",")}|${ghost.map((x) => x.code).join(",")}`;
   return (
     <div
       className="relative"
@@ -1071,7 +1057,18 @@ export function MoneyLinesChart({
       {endLabels && (
         <FlowEndLabels chart={chart} items={labels} version={labelVersion}
           gridTop={10} gridRight={gutterRight} gridBottom={22}
-          onHover={setHoverCode} />
+          onHover={(code) => {
+            if (!chart || chart.isDisposed?.()) return;
+            try {
+              chart.dispatchAction({ type: "downplay" });
+              if (code) {
+                const idx = shown.findIndex((x) => x.code === code);
+                if (idx >= 0) chart.dispatchAction({ type: "highlight", seriesIndex: idx });
+              }
+            } catch {
+              /* 实例可能刚被销毁 */
+            }
+          }} />
       )}
     </div>
   );
