@@ -174,6 +174,12 @@ bash web/dev.sh       # 前端开发模式 :5273（/api 代理到 :6799）
   arisk 自己的采集链路（LaunchAgent `com.arisk.web` :8788 / `com.arisk.proxy` :8899 /
   `com.arisk.update` 每交易日晚 22:10 更新数据）**完全独立**，本项目只读不写，
   上游 `git pull` 不会影响这里。`ARISK_DIR` / `ARISK_LIVE` 可覆盖路径与代理地址。
+  **没装 arisk 时不再吐 JSON 错误**：`/arisk/page` 改回 `services/arisk_guide.py` 渲染的
+  安装引导页（GitHub 地址 + 现场体检 ✅/❌ + 六步可复制命令 + 自检命令），
+  体检项 = 安装目录 / `arisk_monitor_local.html` / `arisk_data.json` / :8788 / :8899
+  （端口探测 0.35s 超时，失败当 False，纯展示不阻塞）。另有 `GET /arisk/health` 给 JSON
+  体检（`installed` / `missing` / `ports`），装好后自检看它即可；渲染是纯字符串函数，
+  单测在 `tests/test_arisk_guide.py`（不触网、不读时钟）。
 - **涨停复盘（2026-11-07 新增一级导航，`#/limitup`，页面名「涨停复盘」，ADR-0006）**：
   复刻经传「涨停棱镜」（页内那张图表卡片仍叫「涨停棱镜」），
   四个面板 —— 涨停周期表（近 N 日 × 每日 Top10 主题网格，单元格角标 = 该主题近 20 日涨停总数）、

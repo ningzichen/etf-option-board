@@ -19,6 +19,7 @@ arisk 自己的采集/更新链路（LaunchAgent `com.arisk.update` + `update_ar
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from pathlib import Path
@@ -26,6 +27,8 @@ from pathlib import Path
 import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
+
+from services.arisk_guide import port_open, render_install_guide
 
 log = logging.getLogger("arisk")
 
@@ -63,20 +66,70 @@ def _rewrite_html(html: str) -> str:
     return "\n".join(kept)
 
 
+def _probe() -> tuple[list[str], bool, bool, bool]:
+    """现场体检：返回（缺失项人话列表、面板 HTML 是否在、数据 JSON 是否在、目录是否在）。"""
+    missing: list[str] = []
+    dir_ok = ARISK_DIR.is_dir()
+    if not dir_ok:
+        missing.append(f"安装目录不存在：{ARISK_DIR}")
+    html_ok = (ARISK_DIR / _HTML_NAME).is_file()
+    if not html_ok:
+        missing.append(f"面板文件缺失：{ARISK_DIR / _HTML_NAME}")
+    data_ok = (ARISK_DIR / _DATA_NAME).is_file()
+    if not data_ok:
+        missing.append(f"日更数据缺失：{ARISK_DIR / _DATA_NAME}（跑一次 update_arisk_data.py）")
+    return missing, html_ok, data_ok, dir_ok
+
+
+async def _build_guide() -> HTMLResponse:
+    missing, html_ok, data_ok, dir_ok = _probe()
+    port_web, port_live = await asyncio.gather(port_open("127.0.0.1", 8788), port_open("127.0.0.1", 8899))
+    page_html = render_install_guide(
+        arisk_dir=str(ARISK_DIR),
+        live_url=ARISK_LIVE,
+        missing=missing,
+        port_web=port_web,
+        port_live=port_live,
+    )
+    log.info(
+        "arisk 未就绪 → 安装引导页（dir=%s html=%s data=%s web=%s live=%s）",
+        dir_ok, html_ok, data_ok, port_web, port_live,
+    )
+    return HTMLResponse(page_html, headers=_NO_STORE)
+
+
 @router.get("/page", response_class=HTMLResponse)
 async def page() -> Response:
-    """面板 HTML（依赖改写后的同源版）。"""
+    """面板 HTML（改写依赖后的同源版）；没装 arisk 时给「安装引导页」。"""
     src = ARISK_DIR / _HTML_NAME
     try:
         html = src.read_text(encoding="utf-8")
     except OSError as exc:
         log.warning("arisk 面板读取失败 %s: %s", src, exc)
-        return JSONResponse(
-            {"error": f"找不到 arisk 面板：{src}", "hint": "确认 ~/workspace/arisk 存在"},
-            status_code=200,
-            headers=_NO_STORE,
-        )
+        return await _build_guide()
     return HTMLResponse(_rewrite_html(html), headers=_NO_STORE)
+
+
+@router.get("/health")
+async def health() -> Response:
+    """arisk 接入体检（面板是否装好、文件是否齐、两个本地端口是否在听）。"""
+    missing, html_ok, data_ok, dir_ok = _probe()
+    port_web, port_live = await asyncio.gather(port_open("127.0.0.1", 8788), port_open("127.0.0.1", 8899))
+    return JSONResponse(
+        {
+            "installed": html_ok and data_ok,
+            "dir": str(ARISK_DIR),
+            "dir_exists": dir_ok,
+            "html": html_ok,
+            "data": data_ok,
+            "live_url": ARISK_LIVE,
+            "ports": {"web_8788": port_web, "live_8899": port_live},
+            "missing": missing,
+            "github": "https://github.com/zhysh3/a-share-monitor-en",
+            "hint": None if html_ok and data_ok else "打开 #/arisk 查看安装引导（或看 /arisk/page）",
+        },
+        headers=_NO_STORE,
+    )
 
 
 @router.get("/data.json")
