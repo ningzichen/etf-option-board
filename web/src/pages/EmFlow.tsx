@@ -7,6 +7,7 @@ import { Dialog, EmptyState, Skeleton, Tabs } from "@/components/ui/misc";
 import { FlowListPanel, type SortKey } from "@/components/FlowListPanel";
 import { DayTag } from "@/components/DayTag";
 import { MoneyLinesChart } from "@/components/charts";
+import { BoardDetailDrawer } from "@/components/BoardDetailDrawer";
 import { api } from "@/lib/api";
 import { usePolling } from "@/lib/usePolling";
 import { onGlobalRefresh } from "@/lib/refresh";
@@ -57,8 +58,8 @@ export function EmFlowPage() {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("flow");
   const [sortDir, setSortDir] = useState(-1);
-  const [mode, setMode] = useState<"line" | "stack">("line");
   const [cfgOpen, setCfgOpen] = useState(false);
+  const [detailCode, setDetailCode] = useState<{ code: string; name: string } | null>(null);
 
   const { data: health } = usePolling(() => api.boardHealth(), 60_000, [], { kind: "ctx", code: "board-health" });
   const interval = 30_000;
@@ -66,7 +67,7 @@ export function EmFlowPage() {
   const { data: targets } = usePolling(() => api.emFlowTargets(), 60_000, [], { kind: "ctx", code: "em-targets" });
   const { data: industries, refresh: refreshIndustries } = usePolling(
     () => api.emFlowIndustries(), 300_000, [], { kind: "ctx", code: "em-industries" });
-  const { data: concepts } = usePolling(
+  const { data: concepts, refresh: refreshConcepts } = usePolling(
     () => api.emFlowConcepts(), 300_000, [], { kind: "ctx", code: "em-concepts" });
   // 财联社「热门板块」（热门行业/概念 + 异动）→ 后端模糊匹配到本地板块。
   // forceHot：只有「刷新」按钮才置 true → 请求带 force=1 绕过后端缓存回源财联社
@@ -259,6 +260,7 @@ export function EmFlowPage() {
         showCheckbox={false}
         onToggleWatch={(r) => void toggleWatch({ code: r.code, name: r.name })}
         watchBusy={watchBusy}
+        onDetail={(r) => setDetailCode({ code: r.code, name: r.name })}
         loading={kind === "index" ? !targets
           : kind === "concept" ? !concepts
             : kind === "hot" ? !hotView && !fallbackHot.length
@@ -285,22 +287,17 @@ export function EmFlowPage() {
               <DayTag date={series?.date} latest={latestDay} />
             </div>
             <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-              <Tabs
-                tabs={[{ key: "line", label: "分线" }, { key: "stack", label: "堆叠" }]}
-                value={mode}
-                onChange={(k) => setMode(k as "line" | "stack")}
-              />
               <span className="tnum text-muted-foreground">{series?.date ?? "—"}</span>
-              <button
-                type="button"
-                onClick={() => setCfgOpen(true)}
-                disabled={kind !== "industry"}
-                className={cn("inline-flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 transition-colors",
-                  kind === "industry" ? "text-foreground hover:bg-muted" : "cursor-not-allowed opacity-50")}
-                title="行业展示配置（自定义 Top40）"
-              >
-                <Settings2 className="size-3" aria-hidden /> 行业配置
-              </button>
+              {(kind === "industry" || kind === "concept") && (
+                <button
+                  type="button"
+                  onClick={() => setCfgOpen(true)}
+                  className="inline-flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-foreground transition-colors hover:bg-muted"
+                  title={`${kind === "concept" ? "概念" : "行业"}展示配置（自定义列表）`}
+                >
+                  <Settings2 className="size-3" aria-hidden /> {kind === "concept" ? "概念配置" : "行业配置"}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => void doRefresh()}
@@ -352,7 +349,7 @@ export function EmFlowPage() {
                 ) : (
                   <div className="min-h-0 flex-1">
                     <MoneyLinesChart id={`em-${seriesKind}-${effectiveCode}`} axis={series.axis}
-                      series={dimSeries as any} height="100%" maxLines={5} mode={mode} endLabels />
+                      series={dimSeries as any} height="100%" maxLines={5} endLabels />
                   </div>
                 )}
                 <div className="mt-1 flex flex-wrap items-center justify-between gap-2 px-1 text-[10px] text-muted-foreground">
@@ -369,25 +366,34 @@ export function EmFlowPage() {
         </FramePanel>
       </Frame>
 
-      <EmIndustryConfig
+      <EmBoardConfig
         open={cfgOpen}
         onClose={() => setCfgOpen(false)}
-        data={industries}
-        onChanged={() => void refreshIndustries()}
+        kind={kind === "concept" ? "concept" : "industry"}
+        data={kind === "concept" ? concepts : industries}
+        onChanged={() => { void refreshIndustries(); void refreshConcepts(); }}
+      />
+
+      <BoardDetailDrawer
+        selected={detailCode}
+        date={series?.date ?? health?.last?.date ?? ""}
+        onClose={() => setDetailCode(null)}
       />
     </main>
   );
 }
 
-/** 行业展示配置：新增 / 移除 / 重置为默认 Top40。 */
-function EmIndustryConfig({
-  open, onClose, data, onChanged,
+/** 板块展示配置（行业 / 概念各一份）：新增 / 移除 / 重置为默认 Top40。 */
+function EmBoardConfig({
+  open, onClose, kind, data, onChanged,
 }: {
   open: boolean;
   onClose: () => void;
+  kind: "industry" | "concept";
   data: any;
   onChanged: () => void;
 }) {
+  const label = kind === "concept" ? "概念" : "行业";
   const [busy, setBusy] = useState(false);
   const display: { code: string; name: string }[] = data?.display ?? [];
   const all: { code: string; name: string }[] = data?.all ?? [];
@@ -398,7 +404,7 @@ function EmIndustryConfig({
     if (!item || busy) return;
     setBusy(true);
     try {
-      const res = await api.emFlowConfigAdd(item.code, item.name);
+      const res = await api.emFlowConfigAdd(item.code, item.name, kind);
       if (res?.error) throw new Error(res.error);
       setPick("");
       onChanged();
@@ -413,7 +419,7 @@ function EmIndustryConfig({
     if (busy) return;
     setBusy(true);
     try {
-      const res = await api.emFlowConfigRemove(code);
+      const res = await api.emFlowConfigRemove(code, kind);
       if (res?.error) throw new Error(res.error);
       onChanged();
     } catch (e: any) {
@@ -427,10 +433,10 @@ function EmIndustryConfig({
     if (busy) return;
     setBusy(true);
     try {
-      const res = await api.emFlowConfigReset();
+      const res = await api.emFlowConfigReset(kind);
       if (res?.error) throw new Error(res.error);
       onChanged();
-      toast("已重置为默认 Top40");
+      toast(`已重置${label}为默认 Top40`);
     } catch (e: any) {
       toast("重置失败", { description: String(e?.message || e) });
     } finally {
@@ -449,7 +455,7 @@ function EmIndustryConfig({
             aria-label="选择要添加的行业"
             className="min-w-0 flex-1 rounded border border-border bg-card px-2 py-1 text-[11px]"
           >
-            <option value="">选择行业（按 |主力净流入| 排序前 200）</option>
+            <option value="">选择{label}（按 |主力净流入| 排序前 200）</option>
             {all.map((a) => <option key={a.code} value={a.code}>{a.name} {a.code}</option>)}
           </select>
           <button type="button" onClick={() => void add()} disabled={!pick || busy}

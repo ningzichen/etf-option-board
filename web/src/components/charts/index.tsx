@@ -751,7 +751,7 @@ function NowMarker({
 }
 
 export function MoneyLinesChart({
-  id, axis, series, height = 320, maxLines = 8, mode = "line", vLines, endLabels = false,
+  id, axis, series, height = 320, maxLines = 8, vLines, endLabels = false,
   extra = [], lineWidth = 1.4, nowX,
 }: {
   id: string;
@@ -763,8 +763,6 @@ export function MoneyLinesChart({
   extra?: { code: string; name: string; values: (number | null)[]; color?: string }[];
   height?: number | string;
   maxLines?: number;
-  /** line=分线；stack=堆叠面积（4 维资金用） */
-  mode?: "line" | "stack";
   /** 在这些 x 轴刻度上画竖向虚线（多日图用来分隔交易日） */
   vLines?: string[];
   /** 右侧「虚线 + 名称/值」标签（四维资金用） */
@@ -862,9 +860,7 @@ export function MoneyLinesChart({
         smooth: false,
         connectNulls: false,
         z: focus ? 5 : 2,
-        ...(mode === "stack"
-          ? { stack: "total", areaStyle: { opacity: dim ? 0.07 : 0.35 }, lineStyle: { width: focus ? lineWidth + 1.2 : Math.max(1, lineWidth - 0.4), opacity: dim ? 0.18 : 1, color } }
-          : { lineStyle: { width: focus ? lineWidth + 1.8 : s.watch ? lineWidth + 1 : lineWidth, opacity: dim ? 0.18 : 1, color } }),
+        lineStyle: { width: focus ? lineWidth + 1.8 : s.watch ? lineWidth + 1 : lineWidth, opacity: dim ? 0.18 : 1, color },
         data: s.values,
       };
     }).concat(extras.map((s, i) => ({
@@ -879,7 +875,7 @@ export function MoneyLinesChart({
       itemStyle: { color: extraColor(s, i) },
       lineStyle: { width: Math.max(1, lineWidth * 0.85), color: extraColor(s, i), opacity: 0.9 },
     }))),
-  }), [axis, shown, mode, vLines, endLabels, hoverCode, extras, gutterRight, gutterLeft, lineWidth]);
+  }), [axis, shown, vLines, endLabels, hoverCode, extras, gutterRight, gutterLeft, lineWidth]);
 
   const labels = useMemo<EndLabelItem[]>(() => {
     if (!endLabels) return [];
@@ -1113,7 +1109,7 @@ function flowValues(pts: [string, number][], times: string[]): (number | null)[]
 
 /** 板块资金分时：多条线叠加，线末标签显示「名称 + 资金 + 涨跌幅」，悬停时其余线变淡。 */
 export function BoardFlowChart({
-  id, lines, hoverCode, temp, height = 420, onHoverCode, vLines,
+  id, lines, hoverCode, temp, height = 420, onHoverCode, vLines, nowX,
 }: {
   id: string;
   lines: FlowLine[];
@@ -1124,6 +1120,8 @@ export function BoardFlowChart({
   onHoverCode?: (code: string | null) => void;
   /** 多日图：在这些刻度画竖向虚线做日分隔 */
   vLines?: string[];
+  /** 「现在」竖线所在刻度（HH:MM），不在轴内则忽略 */
+  nowX?: string | null;
 }) {
   const [chart, setChart] = useState<any>(null);
   const times = useMemo(() => flowTimes(lines, temp), [lines, temp]);
@@ -1255,12 +1253,11 @@ export function BoardFlowChart({
       // 0 轴：一条 1px 直线，不带任何刻度/标签
       // 「现在」竖线：与半小时灰虚线区分——实线 + 顶部时间标签。
     // 只认 axis 里存在的刻度，否则 ECharts 会把它画到 0 号位。
-    if (nowX && axis.includes(nowX)) {
-      // 只画线；「现在 HH:MM」文字交给 NowMarker（DOM 图层，见下）——ECharts 的
-      // markLine label 在竖线上会被渲染成竖排、字号也不可控。
-      data.push({ xAxis: nowX, lineStyle: { color: "#111827", type: "solid", width: 1.2 } });
-    }
-    data.push({ yAxis: 0, lineStyle: { color: "#9ca3af", type: "solid", width: 1 } });
+      // 「现在」竖线：与网格虚线区分——实线；文字由 NowMarker 图层承担
+      if (nowX && times.includes(nowX)) {
+        data.push({ xAxis: nowX, lineStyle: { color: "#111827", type: "solid", width: 1.2 } });
+      }
+      data.push({ yAxis: 0, lineStyle: { color: "#9ca3af", type: "solid", width: 1 } });
       series[0].markLine = { symbol: "none", silent: true, label: { show: false }, data };
     }
 
