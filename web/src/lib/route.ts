@@ -11,6 +11,9 @@ import { useEffect, useState } from "react";
 
 export type PageKey = "today" | "options" | "board-flow" | "board-multi" | "board-etf" | "board-em" | "flow-tape" | "wangwang" | "arisk" | "limitup";
 
+/** 默认落地页：专业看板。简洁模式只在本次会话内切换有效，刷新/重开一律回到这里。 */
+export const DEFAULT_PAGE: PageKey = "options";
+
 /** 一级导航分组：期权看板 ｜ 资金分时（内含四个子页）｜ 资金流向（全A逐笔）｜ 汪汪队 ｜ 风险监控 ｜ 涨停复盘 */
 export type SectionKey = "options" | "board" | "flow" | "wangwang" | "arisk" | "limitup";
 
@@ -39,18 +42,18 @@ export const PAGES: PageDef[] = [
 const BY_HASH = new Map(PAGES.map((p) => [p.hash, p.key]));
 const BY_KEY = new Map(PAGES.map((p) => [p.key, p]));
 
-/** hash 字符串 → 页面 key（容忍尾部斜杠与查询串，未知回落期权看板）。 */
+/** hash 字符串 → 页面 key（容忍尾部斜杠与查询串，未知回落默认页）。 */
 export function pageFromHash(hash: string): PageKey {
   const clean = (hash || "").trim().split("?")[0].replace(/\/+$/, "");
-  return BY_HASH.get(clean) ?? "options";
+  return BY_HASH.get(clean) ?? DEFAULT_PAGE;
 }
 
 export function hashOf(key: PageKey): string {
-  return (BY_KEY.get(key) ?? PAGES[0]).hash;
+  return (BY_KEY.get(key) ?? BY_KEY.get(DEFAULT_PAGE)!).hash;
 }
 
 export function titleOf(key: PageKey): string {
-  return (BY_KEY.get(key) ?? PAGES[0]).title;
+  return (BY_KEY.get(key) ?? BY_KEY.get(DEFAULT_PAGE)!).title;
 }
 
 /** 跳到指定页面（写 hash 会触发 hashchange，浏览器前进/后退同样可用）。 */
@@ -60,11 +63,18 @@ export function navigate(key: PageKey) {
   window.location.hash = h;
 }
 
-/** 订阅当前页面。首帧就按现有 hash 解析，避免闪一下默认页。 */
+/** 订阅当前页面。首帧就按现有 hash 解析，避免闪一下默认页。
+ *
+ * 落地页固定是专业看板：直接打开或刷新 `#/today` 也会回落专业模式，
+ * 简洁模式只在本次会话里手动切换有效——避免有人打开看板先看到结论页，
+ * 也避免「上次点了简洁，下次打开还是简洁」的意外。
+ */
 export function usePageRoute(): PageKey {
-  const [key, setKey] = useState<PageKey>(() =>
-    typeof window === "undefined" ? "options" : pageFromHash(window.location.hash),
-  );
+  const [key, setKey] = useState<PageKey>(() => {
+    if (typeof window === "undefined") return DEFAULT_PAGE;
+    const k = pageFromHash(window.location.hash);
+    return k === "today" ? DEFAULT_PAGE : k;
+  });
   useEffect(() => {
     const onHash = () => {
       const raw = window.location.hash;
@@ -77,9 +87,10 @@ export function usePageRoute(): PageKey {
       setKey(k);
     };
     window.addEventListener("hashchange", onHash);
-    // 首次进入没有 hash 时补一个默认值（用 replace 不污染历史）
-    if (!window.location.hash) {
-      window.history.replaceState(null, "", hashOf("options"));
+    // 首次进入：没 hash 或停在简洁模式，都落回专业看板（用 replace 不污染历史）
+    const raw = window.location.hash;
+    if (!raw || pageFromHash(raw) === "today") {
+      window.history.replaceState(null, "", hashOf(DEFAULT_PAGE));
     } else {
       onHash();
     }
