@@ -14,7 +14,7 @@ export function TopBar({
   clock: string;
   onRefresh: () => void;
   onOpenSettings: () => void;
-  /** 当前页名，跟在标题后面（如「ETF 期权日内决策看板 - 四维资金」） */
+  /** 当前页名，跟在标题后面（如「缅A决策看板 - 四维资金」） */
   subtitle?: string;
   /** 左侧导航当前是否常驻展开（决定按钮图标与提示） */
   navOpen?: boolean;
@@ -44,9 +44,9 @@ export function TopBar({
           <Activity className="size-4 shrink-0 text-primary" aria-hidden />
           <span
             className="hidden min-w-0 truncate text-sm font-semibold whitespace-nowrap sm:inline"
-            title={subtitle ? `ETF 期权日内决策看板 - ${subtitle}` : "ETF 期权日内决策看板"}
+            title={subtitle ? `缅A决策看板 - ${subtitle}` : "缅A决策看板"}
           >
-            ETF 期权日内决策看板
+            缅A决策看板
             {subtitle ? (
               <span className="font-normal text-muted-foreground"> - {subtitle}</span>
             ) : null}

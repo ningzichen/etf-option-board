@@ -1,6 +1,6 @@
 {
-  "name": "ETF 期权日内决策看板",
-  "short_name": "ETF 看板",
+  "name": "缅A决策看板",
+  "short_name": "缅A看板",
   "description": "A 股 9 只宽基 ETF 期权的日内决策看板：行情、期权链、资金流、预测与告警。",
   "lang": "zh-CN",
   "start_url": "/",

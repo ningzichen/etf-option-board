@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# ETF 期权日内决策看板：Vite 构建前端 → FastAPI 托管 web/dist，单容器跑在 :6799。
+# 缅A决策看板：Vite 构建前端 → FastAPI 托管 web/dist，单容器跑在 :6799。
 #
 # 本地构建：bash scripts/compose.sh build（自动识别当前仓库的 GHCR 路径）。
 # GitHub Actions 在当前仓库中构建并推送，详见 README「Docker 部署」。
@@ -44,7 +44,7 @@ ARG SOURCE_URL=""
 ARG VCS_REF=""
 LABEL org.opencontainers.image.source="${SOURCE_URL}" \
       org.opencontainers.image.revision="${VCS_REF}" \
-      org.opencontainers.image.title="ETF 期权日内决策看板"
+      org.opencontainers.image.title="缅A决策看板"
 
 USER app
 EXPOSE 6799

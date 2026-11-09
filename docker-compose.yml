@@ -1,4 +1,4 @@
-# ETF 期权日内决策看板 — Docker Compose 一键部署
+# 缅A决策看板 — Docker Compose 一键部署
 #
 # 在完整源码仓库根目录执行，自动按 origin 选择当前仓库的 GHCR 镜像：
 #   bash scripts/compose.sh pull

@@ -1,4 +1,4 @@
-/* ETF 看板 Service Worker：通知、PWA 与浏览器直连模型；不缓存请求或模型配置。 */
+/* 缅A看板 Service Worker：通知、PWA 与浏览器直连模型；不缓存请求或模型配置。 */
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
 

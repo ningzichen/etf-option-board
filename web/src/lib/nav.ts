@@ -28,7 +28,7 @@ export type NavItem = {
 
 /** 一级分组的外观与文案（加新分组：这里加一条 + PAGES 里给页面标 section） */
 const SECTIONS: Record<SectionKey, { label: string; title: string; icon: NavIcon }> = {
-  options: { label: "期权看板", title: "ETF 期权日内决策看板", icon: "options" },
+  options: { label: "期权看板", title: "缅A决策看板", icon: "options" },
   board: { label: "资金分时", title: "资金分时：板块主力 / ETF / 四维资金", icon: "board" },
   flow: { label: "资金流向", title: "资金流向：全A逐笔分档（通达信 / Wind）", icon: "flow" },
   wangwang: { label: "汪汪队ETF", title: "汪汪队 ETF 跟踪器：国家队今天上班了吗", icon: "wangwang" },

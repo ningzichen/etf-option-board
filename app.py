@@ -1,4 +1,4 @@
-"""ETF 期权日内决策看板 — FastAPI 入口。
+"""缅A决策看板 — FastAPI 入口。
 
     /Users/xinxin/.browser-use-env/bin/python3 -m uvicorn app:app --host 0.0.0.0 --port 6799
     （run.sh 实际绑 0.0.0.0，供局域网/Tailscale 访问）
@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
     await ww_svc.close()
 
 
-app = FastAPI(title="ETF 期权日内决策看板", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="缅A决策看板", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
@@ -101,7 +101,7 @@ async def robots():
 @app.get("/llms.txt", include_in_schema=False)
 async def llms():
     return PlainTextResponse(
-        "# ETF 期权日内决策看板\n\n"
+        "# 缅A决策看板\n\n"
         "> A 股 6 只宽基 ETF 期权的日内决策看板（实时行情/期权链/资金流/预测），仅供研究，不构成投资建议。\n\n"
         "- [看板首页](/): 实时行情与期权链\n",
         media_type="text/markdown; charset=utf-8")

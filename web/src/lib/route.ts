@@ -24,7 +24,7 @@ export type PageDef = {
 };
 
 export const PAGES: PageDef[] = [
-  { key: "options", hash: "#/options", label: "期权看板", title: "ETF 期权日内决策看板", section: "options" },
+  { key: "options", hash: "#/options", label: "期权看板", title: "缅A决策看板", section: "options" },
   { key: "board-flow", hash: "#/board/flow", label: "主力资金分时", title: "主力资金分时", section: "board" },
   { key: "board-multi", hash: "#/board/multi", label: "主力资金多日", title: "主力资金多日", section: "board" },
   { key: "board-etf", hash: "#/board/etf", label: "ETF资金流", title: "ETF资金流", section: "board" },

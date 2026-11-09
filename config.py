@@ -1,4 +1,4 @@
-"""ETF 期权日内决策看板 — 配置集中管理。"""
+"""缅A决策看板 — 配置集中管理。"""
 
 import os
 from dataclasses import dataclass, field

@@ -1,4 +1,4 @@
-# AGENTS.md — ETF 期权日内决策看板
+# AGENTS.md — 缅A决策看板
 
 > **2026-11-01 源码回滚事故已恢复**（另一个会话把 10-30 之后的所有改动 `git checkout` 掉并删了
 > `services/index_option.py`）。恢复过程与规格见 `.scratch/restore-2026-11-01.md`。
@@ -315,7 +315,7 @@ bash web/dev.sh       # 前端开发模式 :5273（/api 代理到 :6799）
   子标签（如 `BoardSubNav` 的四个资金页，顶栏没有页面标签，导航入口只有侧栏 + 页内子标签）。
   要新开一个一级分组，再在 `nav.ts` 的 `SECTIONS`（文案）与 `SECTION_ORDER`（顺序）里登记，
   并在 `SideNav.tsx` 的 `ICONS` 里给它一个 lucide 图标（`NavIcon` 类型同步加）。
-- **顶栏标题带当前页名**：`ETF 期权日内决策看板 - {页面名}`（页面名取 `pageLabel(page)`，
+- **顶栏标题带当前页名**：`缅A决策看板 - {页面名}`（页面名取 `pageLabel(page)`，
   资金页显示具体子页如「四维资金」；`span[title]` 存全串，窄屏靠 `truncate` 省略）。
 - **左侧导航行为**：常驻侧栏 200px（`md` 以上），收起后完全不占布局；收起状态点左上角
   按钮弹 224px **浮层抽屉**（带遮罩、Esc 关闭、选完自动关、底部「固定展开」变回常驻）。
