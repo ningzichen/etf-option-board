@@ -94,10 +94,10 @@ export function TapeFlowPage() {
     () => api.tapeFlowSeries(preset, date || undefined, applied || undefined),
     60_000, [preset, date, applied]);
 
-  // 累计成交额对比（当日 vs 前一交易日），与四维资金页同一个副图
+  // 累计成交额（全部A股 = 东方财富全A 47.800000）当日 vs 前一交易日，与四维资金页同一个副图
   const { data: turnover } = usePolling(
-    () => api.tapeFlowTurnover(date || undefined),
-    300_000,
+    () => api.emFlowVolume("market", "47.800000", date || undefined),
+    120_000,
     [date],
     { kind: "ctx", code: `tape-turnover:${date || "latest"}` });
 
@@ -391,7 +391,7 @@ export function TapeFlowPage() {
             </div>
             <div className="mt-1 shrink-0 border-t border-border/40 pt-1">
               <div className="flex items-center gap-3 px-1 pb-0.5 text-[10px] text-muted-foreground">
-                <span className="font-medium">累计成交额</span>
+                <span className="font-medium">累计成交额（全部A股）</span>
                 <span className="inline-flex items-center gap-1">
                   <span className="inline-block h-0.5 w-3 rounded bg-[#3b82f6]" />今日 {turnover?.date ?? data?.date ?? ""}
                 </span>
