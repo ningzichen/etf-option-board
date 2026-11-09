@@ -1,6 +1,7 @@
 # 01 — 四维资金/资金流向：鼠标悬停分时图时十字线与右侧标签闪烁
 
 Status: ready-for-human
+GitHub: https://github.com/NIO-SAI/etf-option-board/issues/14
 Type: bug
 Created: 2026-11-09
 Area: `web/src/components/charts/index.tsx`（MoneyLinesChart / FlowEndLabels）、`web/src/pages/EmFlow.tsx`、`web/src/pages/TapeFlow.tsx`
