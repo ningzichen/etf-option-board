@@ -28,6 +28,7 @@ import asyncio
 import datetime as dt
 import logging
 import time
+from collections import deque
 from typing import Iterable
 
 from services import board_map
@@ -91,6 +92,9 @@ _state: dict = {"cycles": 0, "busy": False, "last_run": None, "last_date": None,
 _last_scan_mono: float | None = None        # 上一轮**开始**的 monotonic
 _scan_started_mono: float | None = None     # 当前轮开始（busy 时用于「已用 x:xx」）
 _final_attempt_day: str | None = None       # 哪一天的收盘定稿已经尝试过（失败也不重试，避免死循环轰炸上游）
+# 单轮耗时的近几轮实测（用于「数据更新还有多久」预估，默认 420 秒）
+_durations: deque = deque(maxlen=5)
+SCAN_EST_DEFAULT = 420.0
 
 
 # --------------------------------------------------------------------------
@@ -419,6 +423,7 @@ async def run_scan(force: bool = False) -> dict:
                        "last_run": dt.datetime.now().isoformat(timespec="seconds"),
                        "last_date": date, "stocks_ok": ok, "stocks_total": total,
                        "last_error": None})
+        _durations.append(time.time() - t0)
         log.info("全A逐笔入库 %s：%d 只 / 金额档 %d 行 / 手数档 %d 行 / 板块 %d 个 / %.0f 亿 / %.0fs",
                  date, ok, len(got["amt"]), len(got["lot"]), boards, ours / 1e8,
                  time.time() - t0)
@@ -465,6 +470,11 @@ async def run_forever() -> None:
         await asyncio.sleep(30)
 
 
+def scan_est() -> float:
+    """单轮预计耗时（近 5 轮实测均值；没有样本时用 420 秒）。"""
+    return (sum(_durations) / len(_durations)) if _durations else SCAN_EST_DEFAULT
+
+
 def state() -> dict:
     """采集器状态 + 供前端算倒计时的相对秒数。
 
@@ -476,9 +486,19 @@ def state() -> dict:
     st = dict(_state)
     now = time.monotonic()
     st["interval"] = SCAN_INTERVAL
-    st["next_scan_in"] = (
+    wait_in = (
         max(0.0, SCAN_INTERVAL - (now - _last_scan_mono))
         if _last_scan_mono is not None else 0.0)
+    st["next_scan_in"] = wait_in
     st["started_in"] = (
         (now - _scan_started_mono) if _scan_started_mono is not None else None)
+    # 「数据更新」= 下一轮跑完的时刻：空闲 = 等待 + 单轮预计；重算中 = 预计剩余。
+    est = scan_est()
+    st["scan_est"] = est
+    st["next_update_in"] = (
+        max(0.0, est - st["started_in"]) if st["started_in"] is not None
+        else wait_in + est)
+    st["next_update_at"] = (
+        dt.datetime.now() + dt.timedelta(seconds=st["next_update_in"])
+    ).strftime("%H:%M")
     return st

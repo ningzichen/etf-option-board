@@ -100,22 +100,29 @@ export function TapeFlowPage() {
     const id = setInterval(() => setNowTs(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
-  const eta = useRef<{ at: number; nextIn: number; started: number | null } | null>(null);
-  const etasig = `${health?.state?.last_run ?? ""}|${health?.state?.next_scan_in ?? ""}|${health?.state?.started_in ?? ""}`;
+  // 倒计时目标 = **数据更新完成**（不是下一轮开始）：空闲 = 等待 + 单轮预计耗时；
+  // 重算中 = 预计剩余。后端给相对秒数，本地逐秒递减、每次轮询重新校准。
+  const eta = useRef<{ at: number; updateIn: number; est: number; started: number | null; at0: string } | null>(null);
+  const etasig = `${health?.state?.last_run ?? ""}|${health?.state?.next_update_in ?? ""}|${health?.state?.busy ?? ""}`;
   useEffect(() => {
     const st = health?.state;
     if (!st) return;
     eta.current = {
       at: Date.now(),
-      nextIn: Number(st.next_scan_in ?? 0),
+      updateIn: Number(st.next_update_in ?? 0),
+      est: Number(st.scan_est ?? 0),
       started: st.started_in == null ? null : Number(st.started_in),
+      at0: String(st.next_update_at ?? ""),
     };
   }, [etasig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const drift = eta.current ? (nowTs - eta.current.at) / 1000 : 0;
   const busy = !!health?.state?.busy;
-  const nextIn = eta.current ? Math.max(0, eta.current.nextIn - drift) : null;
-  const elapsed = eta.current?.started != null ? Math.max(0, eta.current.started + drift) : null;
+  const updateIn = eta.current ? Math.max(0, eta.current.updateIn - drift) : null;
+  const estMin = eta.current ? Math.round(eta.current.est / 60) : null;
+  // 预估只能取近几轮均值，单轮变慢时会跑到 0——别显示停在 0:00，改成「收尾中 · 已用 x:xx」
+  const overrun = busy && updateIn != null && updateIn <= 0;
+  const used = eta.current?.started != null ? Math.max(0, eta.current.started + drift) : null;
 
   // 新数据入库（last_run 变化）→ 立刻重绘曲线，不等下一轮 60s
   const refreshRef = useRef(refresh);
@@ -187,8 +194,13 @@ export function TapeFlowPage() {
               <Tabs tabs={PRESETS} value={preset} onChange={setPreset} />
               <DayTag date={data?.date} latest={latest} />
               {busy ? (
-                <Badge variant="info-light">
-                  重算中{elapsed != null ? ` ${mmss(elapsed)}` : "…"}
+                <Badge
+                  variant="info-light"
+                  title={overrun
+                    ? `本轮比预估慢（单轮预计约 ${estMin ?? 9} 分钟），仍在重算，完成后本页自动刷新`
+                    : `正在重算，预计 ${eta.current?.at0 ?? "—"} 更新完成`}
+                >
+                  {overrun ? `收尾中 · 已用 ${used != null ? mmss(used) : "—"}` : `更新中 ${updateIn != null ? mmss(updateIn) : "…"}`}
                 </Badge>
               ) : phase === "lunch" ? (
                 <span className="text-[11px] text-muted-foreground">休市 · 13:00 继续</span>
@@ -198,12 +210,13 @@ export function TapeFlowPage() {
                 <span className="text-[11px] text-muted-foreground">休市</span>
               ) : phase === "pre" ? (
                 <span className="text-[11px] text-muted-foreground">09:30 开始重算</span>
-              ) : nextIn != null ? (
+              ) : updateIn != null ? (
                 <span
                   className="text-[11px] text-muted-foreground tnum"
-                  title="全A逐笔每 10 分钟重算一次（单次约 6 分钟），也可点右侧「立即重算」"
+                  title={`全A逐笔每 10 分钟重算一次，单轮约 ${estMin ?? 6} 分钟；` +
+                    `预计 ${eta.current?.at0 ?? "—"} 完成更新，也可点右侧「立即重算」`}
                 >
-                  下次刷新 {mmss(nextIn)}
+                  数据更新 {mmss(updateIn)}
                 </span>
               ) : null}
             </div>
