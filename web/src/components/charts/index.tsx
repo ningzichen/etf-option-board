@@ -867,23 +867,19 @@ export function MoneyLinesChart({
         axisLabel: { color: AXIS, fontSize: 10, formatter: (v: number) => signedFlow(v) },
         splitLine: { lineStyle: { color: "rgba(255,255,255,0.06)" } },
       },
-    series: shown.map((s, i) => {
-      const focus = hoverCode === s.code;
-      const dim = !!hoverCode && !focus;
-      let last: number | null = null;
-      for (let k = s.values.length - 1; k >= 0; k--) {
-        if (s.values[k] != null) { last = s.values[k] as number; break; }
-      }
-      const color = focus ? ((last ?? 0) >= 0 ? "#ef4444" : "#22c55e")
-        : MONEY_COLORS[i % MONEY_COLORS.length];
+    series: shown.map((s, i): any => {
+      const color = MONEY_COLORS[i % MONEY_COLORS.length];
       return {
         name: s.name,
         type: "line",
         showSymbol: false,
         smooth: false,
         connectNulls: false,
-        z: focus ? 5 : 2,
-        lineStyle: { width: focus ? lineWidth + 1.8 : s.watch ? lineWidth + 1 : lineWidth, opacity: dim ? 0.18 : 1, color },
+        z: 2,
+        // 悬停高亮改用 dispatchAction(highlight) 的 emphasis/blur，不再重建 option
+        emphasis: { focus: "series" as const, lineStyle: { width: lineWidth + 1.8 } },
+        blur: { lineStyle: { opacity: 0.18 }, label: { opacity: 0.2 } },
+        lineStyle: { width: s.watch ? lineWidth + 1 : lineWidth, opacity: 1, color },
         data: s.values,
       };
     }).concat(ghost.map((g, i) => ({
@@ -896,7 +892,7 @@ export function MoneyLinesChart({
       z: 1,
       lineStyle: {
         width: Math.max(1, lineWidth - 0.3),
-        opacity: 0.6,
+        opacity: 0.5,
         color: MONEY_COLORS[i % MONEY_COLORS.length],
       },
       data: g.values,
@@ -912,7 +908,7 @@ export function MoneyLinesChart({
       itemStyle: { color: extraColor(s, i) },
       lineStyle: { width: Math.max(1, lineWidth * 0.85), color: extraColor(s, i), opacity: 0.9 },
     }))),
-  }), [axis, shown, vLines, endLabels, hoverCode, extras, gutterRight, gutterLeft, lineWidth]);
+  }), [axis, shown, vLines, endLabels, extras, gutterRight, gutterLeft, lineWidth, ghost]);
 
   const labels = useMemo<EndLabelItem[]>(() => {
     if (!endLabels) return [];
@@ -949,8 +945,25 @@ export function MoneyLinesChart({
         active: hoverCode === s.code,
       });
     });
+    // 幽灵线（前一日）也出标签：同色、文案后缀「昨」
+    ghost.forEach((g, i) => {
+      let idx = -1;
+      for (let k = g.values.length - 1; k >= 0; k--) {
+        if (g.values[k] != null) { idx = k; break; }
+      }
+      if (idx < 0) return;
+      const v = g.values[idx] as number;
+      out.push({
+        id: `ghost-${g.code}`,
+        text: `${g.name} ${signedFlow(v)}`,
+        color: MONEY_COLORS[i % MONEY_COLORS.length],
+        coord: [idx, v],
+        weight: Math.abs(v) * 0.9,
+        dashed: true,
+      });
+    });
     return out;
-  }, [shown, extras, endLabels, hoverCode]);
+  }, [shown, extras, endLabels, ghost, hoverCode]);
 
   // 参考线：半小时竖虚线（单日）/ 日分隔线（多日）+ y=0 横线
   const withGuides = (opt: any) => {
@@ -987,13 +1000,27 @@ export function MoneyLinesChart({
     return () => window.removeEventListener("resize", onResize);
   }, [chart]);
 
+  // 悬停某条线：用 highlight/downplay（配合 emphasis.focus=series），不重建 option
+  useEffect(() => {
+    if (!chart || chart.isDisposed?.()) return;
+    try {
+      chart.dispatchAction({ type: "downplay" });
+      if (hoverCode) {
+        const idx = shown.findIndex((x) => x.code === hoverCode);
+        if (idx >= 0) chart.dispatchAction({ type: "highlight", seriesIndex: idx });
+      }
+    } catch {
+      /* 实例可能刚被销毁 */
+    }
+  }, [chart, hoverCode, shown]);
+
   // option 更新（轮询刷新）后，如果鼠标还在图上，把 tooltip/十字光标重新点亮
   useEffect(() => {
     if (!chart || chart.isDisposed?.()) return;
     if (!insideRef.current || hoverIdxRef.current == null) return;
     const i = hoverIdxRef.current;
     // 数据可能晚到（轮询请求 ~1s），分几个时间点补发，确保最后一次 setOption 之后仍点亮
-    const timers = [40, 300, 900, 1600].map((delay) => setTimeout(() => {
+    const timers = [60, 700].map((delay) => setTimeout(() => {
       try {
         if (!chart.isDisposed?.() && insideRef.current && hoverIdxRef.current != null) {
           chart.dispatchAction({ type: "showTip", seriesIndex: 0, dataIndex: hoverIdxRef.current });
