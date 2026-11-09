@@ -50,3 +50,28 @@
   非法输入提示可见；保存后「已保存」出现且输入/图例/表格同步；删掉数据文件重开 →
   输入框空、提示「未设置 · 保存后显示在图上」、图上无横线。
 - 测试数据已清除（`data/index_levels_manual.json` 删除），未留假记录。
+
+## 追加需求（同日）：当天没设置就每 10 分钟提醒
+
+**口径（逐条确认）**
+1. 判定：**今天（自然日）没有保存过记录**就算没设 —— 顺延来的旧值不算已设。
+2. 通道：走告警总线 `type=manual_levels`，`level=warn` + `silent=true`：
+   右栏告警卡 + 浏览器通知 + 页面 toast，**不响铃**；远程推送默认（min_level=critical）不会发。
+3. 时段：**工作日 09:15–15:00**（含集合竞价与午休），收盘后停；周末/节假日不提醒。
+4. 节奏：**10 分钟**一条；首条在开幕后第一个监控轮次立即发（09:15 起）；跨天自动重置。
+5. 文案：标题「今天还没设上证支撑/压力位」；正文「点左栏『上证指数』打开弹窗填写，保存后本提醒
+   立即停止。当前沿用 YYYY-MM-DD 的支撑 x / 压力 y。」（没有任何记录时说「当前还没有任何手动位。」）
+
+**实现**
+- `services/index_levels_manual.py`：新增纯函数 `has_record(records, day)`（today 有且数值合法）。
+- `services/monitor.py`：`manual_reminder_window(now)` 纯函数 + `_manual_levels_alert(now)`（10 分钟冷却、
+  跨天重置），在 `cycle()` 里排在 `_expiry_alert` 之后、交易时段早退之前调用，所以 09:15 就会跑。
+- `web/src/lib/alertBus.ts`：告警带 `silent: true` 时跳过 `sound.play()`，通知与 toast 照发。
+- `web/src/components/AlertCenter.tsx`：`TYPE_LABEL` 增加 `manual_levels: "手动关键位"`。
+
+**验证**
+- `pytest -q`：731 passed（新增 7 例提醒 + 4 例 `has_record`：窗口边界、首条立即发、10 分钟冷却、
+  今天已设不提醒、跨天再提醒、正文带顺延值）。
+- 进程内模拟（注入 now + 替身 load_records）：9:15 发第一条（warn/silent，正文带 2026-11-06 的
+  3850/3950）→ 9:20 冷却挡住 → 9:25 再发 → 23:00 不提醒 → 今天已设则不提醒。
+- 未做真实 09:15 的 SSE 端到端（当时是深夜），留待次日开盘核对告警卡与浏览器通知。

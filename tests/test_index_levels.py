@@ -145,3 +145,24 @@ class TestEffective:
 
     def test_empty_records(self):
         assert m.effective({}, "2026-11-09") is None
+
+
+class TestHasRecord:
+    """提醒判定：今天有没有保存过（顺延的旧记录不算）。"""
+
+    def test_today_record_counts(self):
+        recs = {"2026-11-09": {"support": 3900, "pressure": 4000}}
+        assert m.has_record(recs, "2026-11-09") is True
+
+    def test_carried_older_record_does_not_count(self):
+        recs = {"2026-11-06": {"support": 3900, "pressure": 4000}}
+        assert m.has_record(recs, "2026-11-09") is False
+        assert m.effective(recs, "2026-11-09") is not None   # 顺延仍生效，但不算「今天设过」
+
+    def test_malformed_today_record_does_not_count(self):
+        assert m.has_record({"2026-11-09": {"support": 3900}}, "2026-11-09") is False
+        assert m.has_record({"2026-11-09": "oops"}, "2026-11-09") is False
+
+    def test_bad_day_and_empty(self):
+        assert m.has_record({}, "2026-11-09") is False
+        assert m.has_record({"2026-11-09": {"support": 1, "pressure": 2}}, "2026/11/09") is False

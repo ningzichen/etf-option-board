@@ -80,6 +80,16 @@ def parse_record(raw, day: str | None = None) -> tuple[dict | None, list[str]]:
     return {"date": key, "support": support, "pressure": pressure}, []
 
 
+def has_record(records: dict, day: str) -> bool:
+    """当天是否保存过（顺延的旧记录不算）。纯函数。"""
+    if not isinstance(records, dict) or not _valid_day(day):
+        return False
+    rec = records.get(day)
+    if not isinstance(rec, dict):
+        return False
+    return _to_float(rec.get("support")) is not None and _to_float(rec.get("pressure")) is not None
+
+
 def effective(records: dict, day: str) -> dict | None:
     """顺延生效：取 date ≤ day 的最大日期记录；没有或该条数值非法则继续往前找。纯函数。"""
     if not isinstance(records, dict):

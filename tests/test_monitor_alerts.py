@@ -28,9 +28,13 @@ def sig(code: str, name: str, side: str, score: float) -> dict:
 def _clean():
     alerts._history.clear()
     monitor._key_fired.clear()
+    monitor._manual_remind_ts = 0.0
+    monitor._manual_remind_day = ""
     yield
     alerts._history.clear()
     monitor._key_fired.clear()
+    monitor._manual_remind_ts = 0.0
+    monitor._manual_remind_day = ""
 
 
 class TestReversalAggregate:
@@ -89,3 +93,56 @@ class TestKeyTimeAlert:
     def test_none_key_time_noop(self):
         asyncio.run(monitor._key_time_alert(None, now=NOW))
         assert alerts.history(5) == []
+
+
+class TestManualLevelsReminder:
+    """收盘前没设手动支撑/压力位就每 10 分钟提醒一次（09:15–15:00，工作日）。"""
+
+    def _call(self, now, records, monkeypatch):
+        monkeypatch.setattr(monitor.idxm, "load_records", lambda: records)
+        asyncio.run(monitor._manual_levels_alert(now))
+
+    def test_window_only_weekday_0915_to_1500(self):
+        assert monitor.manual_reminder_window(dt.datetime(2026, 11, 9, 9, 15)) is True
+        assert monitor.manual_reminder_window(dt.datetime(2026, 11, 9, 12, 30)) is True
+        assert monitor.manual_reminder_window(dt.datetime(2026, 11, 9, 15, 0)) is True
+        assert monitor.manual_reminder_window(dt.datetime(2026, 11, 9, 9, 14)) is False
+        assert monitor.manual_reminder_window(dt.datetime(2026, 11, 9, 15, 1)) is False
+        assert monitor.manual_reminder_window(dt.datetime(2026, 11, 7, 10, 0)) is False  # 周六
+
+    def test_first_reminder_is_immediate_and_carries_old_values(self, monkeypatch):
+        records = {"2026-11-06": {"support": 3850, "pressure": 3950}}
+        self._call(dt.datetime(2026, 11, 9, 9, 15), records, monkeypatch)
+        out = alerts.history(5)
+        assert len(out) == 1
+        a = out[0]
+        assert a["type"] == "manual_levels"
+        assert a["level"] == "warn" and a["silent"] is True
+        assert a["title"] == "今天还没设上证支撑/压力位"
+        assert "沿用 2026-11-06" in a["text"]
+        assert "3850.00" in a["text"] and "3950.00" in a["text"]
+
+    def test_no_values_says_none(self, monkeypatch):
+        self._call(dt.datetime(2026, 11, 9, 9, 15), {}, monkeypatch)
+        assert "还没有任何手动位" in alerts.history(5)[0]["text"]
+
+    def test_ten_minute_cooldown(self, monkeypatch):
+        for hh, mm in ((9, 15), (9, 20), (9, 24), (9, 25)):
+            self._call(dt.datetime(2026, 11, 9, hh, mm), {}, monkeypatch)
+        # 09:15 与 09:25 各一条，中间 9:20/9:24 被冷却挡掉
+        assert len(alerts.history(5)) == 2
+
+    def test_stops_once_today_saved(self, monkeypatch):
+        records = {"2026-11-09": {"support": 3900, "pressure": 4000}}
+        self._call(dt.datetime(2026, 11, 9, 9, 15), records, monkeypatch)
+        assert alerts.history(5) == []
+
+    def test_outside_window_never_reminds(self, monkeypatch):
+        self._call(dt.datetime(2026, 11, 9, 23, 0), {}, monkeypatch)
+        self._call(dt.datetime(2026, 11, 7, 10, 0), {}, monkeypatch)
+        assert alerts.history(5) == []
+
+    def test_reminds_again_next_day(self, monkeypatch):
+        self._call(dt.datetime(2026, 11, 9, 14, 59), {}, monkeypatch)
+        self._call(dt.datetime(2026, 11, 10, 9, 15), {}, monkeypatch)
+        assert len(alerts.history(5)) == 2

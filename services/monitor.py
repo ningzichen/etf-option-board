@@ -10,7 +10,8 @@ import datetime as dt
 import logging
 
 from config import settings
-from services import (alerts, decision, deploy as deploy_svc, em, market_service as ms,
+from services import (alerts, decision, deploy as deploy_svc, em,
+                      index_levels_manual as idxm, market_service as ms,
                       money as money_fmt, reversal, strategy, user_settings as usv)
 from services.universe import ETFS
 
@@ -260,6 +261,51 @@ def _in_trading_window(now: dt.datetime) -> bool:
            (settings.session_pm[0] <= hm <= settings.session_pm[1])
 
 
+# 手动支撑/压力位提醒：交易日 09:15–15:00 内，当天还没保存就每 10 分钟提醒一次。
+# 首条在开盘后的第一个轮次立即发（不等 10 分钟）；跨天自动重置。
+_MANUAL_REMIND_SEC = 600
+_manual_remind_ts: float = 0.0
+_manual_remind_day: str = ""
+
+
+def manual_reminder_window(now: dt.datetime) -> bool:
+    """提醒时段：工作日 09:15–15:00（含集合竞价与午休）。纯函数，便于单测。"""
+    if now.weekday() >= 5:
+        return False
+    return "09:15" <= now.strftime("%H:%M") <= "15:00"
+
+
+async def _manual_levels_alert(now: dt.datetime) -> None:
+    """当天（按自然日）还没保存手动支撑/压力位时，按 10 分钟节奏发一条提醒。
+
+    判定用「今天有没有记录」，与弹窗的顺延生效无关：沿用了上一条旧值也算没设，
+    因为口径要求每天重新确认。用户保存后下一轮就不再提醒。
+    """
+    global _manual_remind_ts, _manual_remind_day
+    day = now.date().isoformat()
+    if day != _manual_remind_day:
+        _manual_remind_day, _manual_remind_ts = day, 0.0
+    if not manual_reminder_window(now):
+        return
+    records = idxm.load_records()
+    if idxm.has_record(records, day):
+        return
+    if _manual_remind_ts and now.timestamp() - _manual_remind_ts < _MANUAL_REMIND_SEC:
+        return
+    _manual_remind_ts = now.timestamp()
+    cur = idxm.effective(records, day)
+    tail = (f"当前沿用 {cur['date']} 的支撑 {cur['support']:.2f} / 压力 {cur['pressure']:.2f}。"
+            if cur else "当前还没有任何手动位。")
+    await alerts.publish({
+        "type": "manual_levels", "level": "warn", "dir": "neutral",
+        # 只弹浏览器通知与页面 toast，不响铃（铃声留给 critical）
+        "silent": True,
+        "title": "今天还没设上证支撑/压力位",
+        "text": f"点左栏「上证指数」打开弹窗填写，保存后本提醒立即停止。{tail}",
+    })
+
+
+
 async def cycle() -> None:
     global _warmed
     now = dt.datetime.now()
@@ -268,6 +314,8 @@ async def cycle() -> None:
         asyncio.create_task(_prewarm())
     # 临期提醒是日期型信号，不该被交易时段挡住——开盘前就该看到「今天到期」
     await _expiry_alert(now)
+    # 手动支撑/压力位：09:15 起若当天还没设，每 10 分钟提醒一次（也不受交易时段早退影响）
+    await _manual_levels_alert(now)
     if not _in_trading_window(now):
         _state["last_cycle"] = now.isoformat(timespec="seconds")
         _state["cycles"] += 1
