@@ -1476,6 +1476,14 @@ async def em_flow_series(target_type: str = Query("index", description="index / 
     for idx, key in ((2, "large"), (3, "medium"), (4, "retail")):
         _, dims[key] = aligned([(p[0], p[idx]) for p in pts])
 
+    # 采集是 1~2 分钟一跳：补成完整分钟轴，半小时刻度才齐全，也才能和成交量副图对齐
+    dense = bf.densify_axis(axis)
+    if dense and dense != axis:
+        for key in list(dims):
+            dims[key] = bf.align_to_axis(
+                [(t, v) for t, v in zip(axis, dims[key]) if v is not None], dense)
+        axis = dense
+
     meta = await asyncio.to_thread(bf.read_em_meta, date, code)
     out = {"date": date, "code": code, "kind": kind, "axis": axis, "dims": dims,
            "name": meta.get("name") or code}

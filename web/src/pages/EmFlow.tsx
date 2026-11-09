@@ -238,6 +238,13 @@ export function EmFlowPage() {
     { kind: "emseries", code: `vol:${seriesKind}:${effectiveCode}` },
   );
 
+  // 成交量按主图的时间轴对齐：两张图列位置与半小时刻度才会一致
+  const alignVolume = useCallback((arr?: (number | null)[]) => {
+    if (!arr || !volume?.axis?.length) return [];
+    const map = new Map(volume.axis.map((t, i) => [t, arr[i]] as const));
+    return (series?.axis ?? []).map((t) => map.get(t) ?? null);
+  }, [volume, series?.axis]);
+
   const nameOf = useMemo(
     () => options.find((o) => o.code === effectiveCode)?.name ?? effectiveCode,
     [options, effectiveCode],
@@ -376,9 +383,9 @@ export function EmFlowPage() {
                       <div className="h-[140px]">
                         <VolumeCompareChart
                           id={`vol-${seriesKind}-${effectiveCode}`}
-                          axis={volume?.axis ?? []}
-                          today={volume?.today ?? []}
-                          prev={volume?.prev ?? []}
+                          axis={series.axis}
+                          today={alignVolume(volume?.today)}
+                          prev={alignVolume(volume?.prev)}
                           date={volume?.date}
                           prevDate={volume?.prev_date}
                           height="100%"

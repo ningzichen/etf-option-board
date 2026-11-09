@@ -1176,6 +1176,23 @@ def densify_axis(times: list[str]) -> list[str]:
     return full[a:b + 1] if a <= b else list(times)
 
 
+def densify_series(axis: list[str], values: list) -> tuple[list[str], list]:
+    """把稀疏的分钟轴补成连续分钟轴，并把值按前值填充。纯函数。
+
+    4 维分时的采集是 1~2 分钟一跳，直接用稀疏轴会让「半小时刻度」缺项，
+    且与成交量副图（完整分钟轴）的列位置对不齐。
+    """
+    axis = list(axis or [])
+    values = list(values or [])
+    if not axis:
+        return ([], [])
+    dense = densify_axis(axis)
+    if dense == axis:
+        return (axis, values)
+    pts = [(t, v) for t, v in zip(axis, values) if v is not None]
+    return (dense, align_to_axis(pts, dense))
+
+
 def align_to_axis(points: list[tuple[str, float]], axis: list[str]) -> list[float | None]:
     """把稀疏点按「最近前值」填到给定时间轴。纯函数。"""
     lookup = {str(t): v for t, v in points or []}
