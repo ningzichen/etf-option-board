@@ -796,6 +796,10 @@ export function MoneyLinesChart({
   const [chart, setChart] = useState<any>(null);
   // 悬停右侧标签 → 对应分时线加粗并变红/绿，其余淡出（与主力资金分时一致）
   const [hoverCode, setHoverCode] = useState<string | null>(null);
+  // 轮询/刷新会 setOption(notMerge)，ECharts 会顺带清掉十字光标与 tooltip；
+  // 记住「鼠标在图上、停在第几个点」，每次 option 更新后补发一次 showTip。
+  const hoverIdxRef = useRef<number | null>(null);
+  const insideRef = useRef(false);
   const option = useMemo(() => ({
     animation: false,
     color: MONEY_COLORS,
@@ -965,12 +969,57 @@ export function MoneyLinesChart({
     return () => window.removeEventListener("resize", onResize);
   }, [chart]);
 
+  // option 更新（轮询刷新）后，如果鼠标还在图上，把 tooltip/十字光标重新点亮
+  useEffect(() => {
+    if (!chart || chart.isDisposed?.()) return;
+    if (!insideRef.current || hoverIdxRef.current == null) return;
+    const i = hoverIdxRef.current;
+    // 数据可能晚到（轮询请求 ~1s），分几个时间点补发，确保最后一次 setOption 之后仍点亮
+    const timers = [40, 300, 900, 1600].map((delay) => setTimeout(() => {
+      try {
+        if (!chart.isDisposed?.() && insideRef.current && hoverIdxRef.current != null) {
+          chart.dispatchAction({ type: "showTip", seriesIndex: 0, dataIndex: hoverIdxRef.current });
+        }
+      } catch {
+        /* 忽略：图表可能刚被销毁 */
+      }
+    }, delay));
+    return () => timers.forEach(clearTimeout);
+  });  // 不设 deps：父组件任何一次重渲染（轮询）都会 setOption 清掉 tooltip，逐次补发
+
   if (!axis.length) return null;
   const labelVersion = `${axis.length}:${shown.map((x) => x.code).join(",")}|${extras.map((x) => x.code).join(",")}`;
   return (
-    <div className="relative" style={{ height }}>
+    <div
+      className="relative"
+      style={{ height }}
+      onMouseEnter={() => { insideRef.current = true; }}
+      onMouseLeave={() => { insideRef.current = false; hoverIdxRef.current = null; }}
+    >
       <ReactECharts key={id} option={withGuides(option)} notMerge style={{ height: "100%" }}
-        onChartReady={(c: any) => { setChart(c); joinGroup(c, linkGroup); }} />
+        onChartReady={(c: any) => {
+          setChart(c);
+          joinGroup(c, linkGroup);
+          // 记录悬停位置：axis 值 → 索引；鼠标移出图表则清空
+          c.on("updateAxisPointer", (e: any) => {
+            const v = e?.axesInfo?.[0]?.value;
+            if (v == null) return;
+            const i = axis.indexOf(String(v));
+            if (i >= 0) hoverIdxRef.current = i;
+          });
+          c.getZr().on("mousemove", (e: any) => {
+            insideRef.current = true;
+            // 直接把像素位置换算成「第几个刻度」：比 updateAxisPointer 的 value 更可靠
+            try {
+              const pt = c.convertFromPixel({ gridIndex: 0 }, [e.offsetX, e.offsetY]);
+              if (pt && isFinite(pt[0])) {
+                hoverIdxRef.current = Math.max(0, Math.min(axis.length - 1, Math.round(pt[0])));
+              }
+            } catch {
+              /* 忽略 */
+            }
+          });
+        }} />
       {nowX && axis.includes(nowX) ? (
         <NowMarker chart={chart} index={axis.indexOf(nowX)} label={nowX} gridTop={10} />
       ) : null}
@@ -1402,7 +1451,8 @@ export function VolumeCompareChart({
   /** 与主图共享同一 group：十字光标/竖线会同步 */
   linkGroup?: string;
 }) {
-  const toWan = (v: number | null) => (v == null ? null : Math.round((v / 1e4) * 100) / 100);
+  // 成交额（元）→ 亿元，保留两位
+  const toYi = (v: number | null) => (v == null ? null : Math.round((v / 1e8) * 100) / 100);
   const option = useMemo(() => ({
     animation: false,
     grid: { left: 54, right: LABEL_GUTTER, top: 6, bottom: 20 },
@@ -1414,12 +1464,21 @@ export function VolumeCompareChart({
       textStyle: { color: "#e4e4e7", fontSize: 11 },
       formatter: (ps: any[]) => {
         if (!ps?.length) return "";
+        const idx = ps[0].dataIndex ?? 0;
+        const t = today[idx] ?? 0;
+        const y = prev[idx] ?? 0;
+        const net = t - y;
+        const netTxt = `${net >= 0 ? "+" : "-"}${Math.abs(net / 1e8).toFixed(2)}亿`;
+        const netColor = net >= 0 ? "#f87171" : "#4ade80";
         const rows = ps.map((p) =>
           `<div style="display:flex;justify-content:space-between;gap:14px">
              <span>${p.marker}${p.seriesName}</span>
-             <span>${p.value == null ? "—" : `${p.value} 万手`}</span>
+             <span>${p.value == null ? "—" : `${p.value} 亿`}</span>
            </div>`).join("");
-        return `<div style="margin-bottom:4px">${ps[0].axisValue}</div>${rows}`;
+        return `<div style="margin-bottom:4px;display:flex;justify-content:space-between;gap:16px">
+            <span>${ps[0].axisValue}</span>
+            <span>两日净额 <b style="color:${netColor}">${netTxt}</b></span>
+          </div>${rows}`;
       },
     },
     legend: { show: false },
@@ -1437,7 +1496,7 @@ export function VolumeCompareChart({
     yAxis: {
       type: "value",
       scale: true,
-      name: "万手",
+      name: "亿元",
       nameTextStyle: { color: "#71717a", fontSize: 9 },
       axisLabel: { color: "#71717a", fontSize: 9 },
       splitLine: { lineStyle: { color: "rgba(255,255,255,0.06)", type: "dashed" } },
@@ -1446,7 +1505,7 @@ export function VolumeCompareChart({
       {
         name: `今日 ${date ?? ""}`.trim(),
         type: "line",
-        data: today.map(toWan),
+        data: today.map(toYi),
         showSymbol: false,
         lineStyle: { width: 1.4, color: "#3b82f6" },
         itemStyle: { color: "#3b82f6" },
@@ -1455,7 +1514,7 @@ export function VolumeCompareChart({
       {
         name: `昨日 ${prevDate ?? ""}`.trim(),
         type: "line",
-        data: prev.map(toWan),
+        data: prev.map(toYi),
         showSymbol: false,
         lineStyle: { width: 1.2, color: "#9ca3af", type: "dashed" },
         itemStyle: { color: "#9ca3af" },
