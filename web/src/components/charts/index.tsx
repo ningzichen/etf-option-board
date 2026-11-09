@@ -708,6 +708,48 @@ const MONEY_COLORS = ["#ef4444", "#f59e0b", "#a855f7", "#3b82f6", "#14b8a6", "#e
 /** 叠加价格线（第二 Y 轴）的配色：与资金线区分开 */
 const EXTRA_COLORS = ["#0ea5e9", "#64748b", "#e11d48", "#ca8a04"];
 
+/** 「现在」竖线的文字标签：绝对定位在图表之上，指针 x 由 ECharts 像素坐标换算。
+ *  不用 markLine 自带 label——竖线上会被渲染成竖排、且字体/底色不可控。 */
+function NowMarker({
+  chart, index, label, gridTop = 10,
+}: { chart: any; index: number; label: string; gridTop?: number }) {
+  const [x, setX] = useState<number | null>(null);
+  useEffect(() => {
+    const calc = () => {
+      try {
+        if (!chart || chart.isDisposed?.() || index < 0) { setX(null); return; }
+        const px = chart.convertToPixel({ xAxisIndex: 0 }, index);
+        if (typeof px === "number" && Number.isFinite(px)) setX(px);
+      } catch {
+        /* 实例销毁/轴未就绪：忽略，下一次 effect 再算 */
+      }
+    };
+    calc();
+    let ro: ResizeObserver | null = null;
+    try {
+      const dom = chart?.getDom?.();
+      if (dom && typeof ResizeObserver !== "undefined") {
+        ro = new ResizeObserver(calc);
+        ro.observe(dom);
+      }
+    } catch {
+      /* 实例已销毁 */
+    }
+    return () => ro?.disconnect();
+  }, [chart, index]);
+  if (x == null) return null;
+  return (
+    <div
+      className="pointer-events-none absolute z-10 -translate-x-1/2 whitespace-nowrap"
+      style={{ left: x, top: gridTop + 2 }}
+    >
+      <span className="rounded bg-white/90 px-1 py-0.5 text-[10px] font-medium text-slate-900 shadow-sm ring-1 ring-black/5">
+        现在 {label}
+      </span>
+    </div>
+  );
+}
+
 export function MoneyLinesChart({
   id, axis, series, height = 320, maxLines = 8, mode = "line", vLines, endLabels = false,
   extra = [], lineWidth = 1.4, nowX,
@@ -889,15 +931,9 @@ export function MoneyLinesChart({
     // 「现在」竖线：与半小时灰虚线区分——实线 + 顶部时间标签。
     // 只认 axis 里存在的刻度，否则 ECharts 会把它画到 0 号位。
     if (nowX && axis.includes(nowX)) {
-      data.push({
-        xAxis: nowX,
-        lineStyle: { color: "#111827", type: "solid", width: 1.2 },
-        label: {
-          show: true, formatter: `现在 ${nowX}`, position: "insideEndTop",
-          color: "#111827", fontSize: 10, fontWeight: 500,
-          backgroundColor: "rgba(255,255,255,0.88)", padding: [2, 4], borderRadius: 3,
-        },
-      });
+      // 只画线；「现在 HH:MM」文字交给 NowMarker（DOM 图层，见下）——ECharts 的
+      // markLine label 在竖线上会被渲染成竖排、字号也不可控。
+      data.push({ xAxis: nowX, lineStyle: { color: "#111827", type: "solid", width: 1.2 } });
     }
     data.push({ yAxis: 0, lineStyle: { color: "#9ca3af", type: "solid", width: 1 } });
     opt.series[0].markLine = { symbol: "none", silent: true, label: { show: false }, data };
@@ -924,6 +960,9 @@ export function MoneyLinesChart({
     <div className="relative" style={{ height }}>
       <ReactECharts key={id} option={withGuides(option)} notMerge style={{ height: "100%" }}
         onChartReady={setChart} />
+      {nowX && axis.includes(nowX) ? (
+        <NowMarker chart={chart} index={axis.indexOf(nowX)} label={nowX} gridTop={10} />
+      ) : null}
       {endLabels && (
         <FlowEndLabels chart={chart} items={labels} version={labelVersion}
           gridTop={10} gridRight={gutterRight} gridBottom={22}
@@ -1217,15 +1256,9 @@ export function BoardFlowChart({
       // 「现在」竖线：与半小时灰虚线区分——实线 + 顶部时间标签。
     // 只认 axis 里存在的刻度，否则 ECharts 会把它画到 0 号位。
     if (nowX && axis.includes(nowX)) {
-      data.push({
-        xAxis: nowX,
-        lineStyle: { color: "#111827", type: "solid", width: 1.2 },
-        label: {
-          show: true, formatter: `现在 ${nowX}`, position: "insideEndTop",
-          color: "#111827", fontSize: 10, fontWeight: 500,
-          backgroundColor: "rgba(255,255,255,0.88)", padding: [2, 4], borderRadius: 3,
-        },
-      });
+      // 只画线；「现在 HH:MM」文字交给 NowMarker（DOM 图层，见下）——ECharts 的
+      // markLine label 在竖线上会被渲染成竖排、字号也不可控。
+      data.push({ xAxis: nowX, lineStyle: { color: "#111827", type: "solid", width: 1.2 } });
     }
     data.push({ yAxis: 0, lineStyle: { color: "#9ca3af", type: "solid", width: 1 } });
       series[0].markLine = { symbol: "none", silent: true, label: { show: false }, data };
