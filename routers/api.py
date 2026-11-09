@@ -1538,8 +1538,18 @@ async def em_flow_volume(target_type: str = Query("index",
     today = [by_day[target][t] for t in axis]
     prev_map = by_day.get(prev_day, {}) if prev_day else {}
     prev = [prev_map.get(t) for t in axis]
+
+    # 副图要的是「当日总量累计曲线」：把每分钟成交量累加，昨日同样累计
+    def cumulative(seq: list) -> list[float]:
+        run = 0.0
+        out: list[float] = []
+        for v in seq:
+            run += float(v or 0)
+            out.append(run)
+        return out
+
     return {"date": target, "prev_date": prev_day, "axis": axis,
-            "today": today, "prev": prev, "unit": "手",
+            "today": cumulative(today), "prev": cumulative(prev), "unit": "手",
             "error": None if axis else "该日没有成交量分时"}
 
 

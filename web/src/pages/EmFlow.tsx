@@ -364,7 +364,7 @@ export function EmFlowPage() {
                     </div>
                     <div className="mt-1 border-t border-border/40 pt-1">
                       <div className="flex items-center gap-3 px-1 pb-0.5 text-[10px] text-muted-foreground">
-                        <span className="font-medium">成交量</span>
+                        <span className="font-medium">累计成交量</span>
                         <span className="inline-flex items-center gap-1">
                           <span className="inline-block h-0.5 w-3 rounded bg-[#3b82f6]" />今日 {volume?.date ?? series?.date ?? ""}
                         </span>
