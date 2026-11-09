@@ -28,7 +28,9 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
+import os
 from collections import deque
 
 from services import alerts, em, money as money_fmt, option_service as osvc, strategy
@@ -53,6 +55,56 @@ CONFIRM_BARS = 120      # 5m 抓取根数
 
 _signals: dict[str, deque] = {}            # code -> deque[signal记录]（供分时图打标记）
 _state: dict[str, tuple[str, float, float]] = {}  # code -> (方向, 分数, 时间戳)：供方向加分
+
+# 落盘：这两份都是「当日」语义，重启/部署后必须还在——否则左栏变盘角标、分时图标记、
+# 方向加分（±15）全部丢失，要等下一次真实变盘才回来（每次发版都会踩一次）。
+# 跨日文件直接作废（旧信号对新交易日没有意义），写入时只保留当天。
+_SIG_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "data", "reversal_signals.json")
+_loaded = False
+
+
+def _load() -> None:
+    """首次访问时加载当日信号与冷却状态（文件不存在/跨日/损坏都按空处理）。"""
+    global _loaded
+    if _loaded:
+        return
+    _loaded = True
+    try:
+        with open(_SIG_PATH, encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return
+    today = dt.datetime.now().strftime("%Y-%m-%d")
+    if d.get("day") != today:
+        return
+    for code, rows in (d.get("signals") or {}).items():
+        if not isinstance(rows, list):
+            continue
+        keep = [r for r in rows if isinstance(r, dict) and r.get("day") == today]
+        if keep:
+            _signals[code] = deque(keep, maxlen=20)
+    for code, st in (d.get("state") or {}).items():
+        try:
+            side, score, ts = st
+            _state[code] = (str(side), float(score), float(ts))
+        except (TypeError, ValueError):
+            continue
+
+
+def _save() -> None:
+    try:
+        os.makedirs(os.path.dirname(_SIG_PATH), exist_ok=True)
+        payload = {
+            "day": dt.datetime.now().strftime("%Y-%m-%d"),
+            "signals": {c: list(q) for c, q in _signals.items() if q},
+            "state": {c: list(v) for c, v in _state.items()},
+        }
+        with open(_SIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+    except OSError as exc:
+        log.debug("变盘信号落盘失败: %s", exc)
 
 
 def _recent_cross(closes: list[float], lookback: int) -> str | None:
@@ -238,6 +290,7 @@ async def _build_plan(etf: dict, ctx: dict, side: str, score: float,
 async def check(etf: dict, ctx: dict) -> dict | None:
     """评估变盘点；达阈值且通过过滤则返回告警 dict，否则 None。"""
     from services import market_service as ms  # 延迟导入，避免循环
+    _load()
     code, name = etf["code"], etf["name"]
     hm = dt.datetime.now().strftime("%H:%M")
     if not (TIME_START <= hm < TIME_END):
@@ -305,6 +358,7 @@ async def check(etf: dict, ctx: dict) -> dict | None:
         "score": score, "price": plan.get("underlying_price"),
         "title": sig["title"],
     })
+    _save()
     log.info("变盘点 %s %s %.0f分：%s", code, side, score, "·".join(hits))
     return sig
 
@@ -316,6 +370,7 @@ def factor(code: str | None) -> tuple[float, str | None]:
     """
     if not code:
         return 0.0, None
+    _load()
     st = _state.get(code)
     if not st:
         return 0.0, None
@@ -331,5 +386,6 @@ def factor(code: str | None) -> tuple[float, str | None]:
 
 def recent(code: str, limit: int = 10) -> list[dict]:
     """当日该标的的变盘点（供分时图打标记）。"""
+    _load()
     today = dt.datetime.now().strftime("%Y-%m-%d")
     return [s for s in _signals.get(code, {}) if s.get("day") == today][-limit:]
