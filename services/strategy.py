@@ -21,8 +21,10 @@ _NT_TTL = 30
 
 _DIR_CACHE: tuple[float, dict] | None = None
 _DIR_TTL = 60
-# 过期值最长继续服务时间：SWR 期间上游若持续失败，旧值也不该无限顶下去
-_DIR_STALE_MAX = 300
+# 过期值最长继续服务时间：SWR 期间上游若持续失败，旧值也不该无限顶下去。
+# 2026-11-09 从 300s 收到 90s：300s 时徽标（看多/观望）会滞后 5 分钟，
+# 与「变盘角标已现、徽标还没变」自相矛盾；90s 仍够一次后台重建（1~3s）不阻塞。
+_DIR_STALE_MAX = 90
 _DIR_REFRESHING = False
 _DIR_LOCK = asyncio.Lock()
 

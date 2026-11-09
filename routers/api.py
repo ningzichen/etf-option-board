@@ -529,7 +529,8 @@ async def alerts_history(limit: int = 50):
 
 @router.post("/admin/test-alert")
 async def admin_test_alert():
-    """发 3 条【测试】告警走真实 SSE 通道，用于验证浏览器通知/声音/弹窗。
+    """发 4 条【测试】告警走真实 SSE 通道，用于验证浏览器通知/声音/弹窗，
+    以及「变盘告警 → 左栏角标即时刷新」链路（第 4 条 type=reversal）。
 
     会进告警历史与列表（标题带【测试】前缀便于区分）。"""
     now = dt.datetime.now().isoformat(timespec="seconds")
@@ -552,6 +553,12 @@ async def admin_test_alert():
              {"code": "510050", "name": "上证50ETF华夏", "main_inflow": 120000000,
               "main_total": 1.2, "pct": 0.41, "surge": None, "vol_ratio": 1.4},
          ]},
+        # 变盘告警：前端收到后会立即刷新 /api/directions（左栏角标）与当前标的详情，
+        # 用来验证「信号出现即时可见」而不必等真实变盘。
+        {"type": "reversal", "level": "critical", "dir": "bear",
+         "etf_code": "510300", "etf_name": "沪深300ETF华泰柏瑞",
+         "title": "【测试】510300 看空变盘信号 66分",
+         "text": "第四条测试告警（reversal）：收到后左栏应变盘角标与中栏策略立即刷新，无需手动刷新页面。"},
     ]
     for s in samples:
         await alerts.publish({**s, "test": True, "ts": now})

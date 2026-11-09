@@ -14,6 +14,7 @@ import { api } from "@/lib/api";
 import { usePolling, type CacheMeta } from "@/lib/usePolling";
 import { dayKey } from "@/lib/cache";
 import { onGlobalRefresh } from "@/lib/refresh";
+import { subscribeAlerts } from "@/lib/alertBus";
 import { usePrefetch } from "@/lib/prefetch";
 import { clsUpDown, hhmmss, nf, pct, signedFlow } from "@/lib/format";
 
@@ -44,7 +45,7 @@ export function OptionsBoard() {
   const { data: universe } = usePolling(() => api.universe(), 3600_000);
   const { data: indices } = usePolling(() => api.indices(), 10_000);
   const { data: etfQuotes } = usePolling(() => api.etfs(), 10_000);
-  const { data: directions } = usePolling(() => api.directions(), 60_000);
+  const { data: directions, refresh: refreshDirs } = usePolling(() => api.directions(), 60_000);
   // 跨 6 只标的的合约横评（后端 30s SWR 缓存，轮询 30s 即可）
   const { data: topPicks, refresh: refreshPicks } = usePolling(() => api.topPicks(6), 30_000);
   // 左侧迷你走势：把整包序列缓存到 IndexedDB（当日有效），刷新/重开页面先秒出
@@ -166,6 +167,20 @@ export function OptionsBoard() {
 
   // 顶栏「刷新」广播 → 只刷本页主数据（其它页有自己的订阅）
   useEffect(() => onGlobalRefresh(() => { void refreshCtx(); }), [refreshCtx]);
+
+  // 变盘告警**到达即刷**：左栏角标取自 /api/directions，原本只靠 60s 轮询，
+  // 信号出现后要等下一轮才显示（用户会以为没算进去、只能刷新页面）。
+  // 命中当前标的时顺带刷中栏（ctx + 策略），避免「角标说变盘看空、策略卡还看多」。
+  useEffect(() => subscribeAlerts((a: any) => {
+    if (a?.type !== "reversal" || a.backfill) return;
+    void refreshDirs();
+    const hit = a.etf_code === etfCode
+      || (a.items ?? []).some((it: any) => it?.code === etfCode);
+    if (hit) {
+      void refreshCtx();
+      void refreshStrategy();
+    }
+  }), [etfCode, refreshDirs, refreshCtx, refreshStrategy]);
 
   // 切月份：立刻给「切换中」反馈，等真实网络请求回来再撤；最短展示 450ms，避免秒回时看不到反馈
   const onMonth = async (m: number) => {
