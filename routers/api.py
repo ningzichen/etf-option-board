@@ -19,7 +19,7 @@ from services import (alerts, board_collector as bcol, boardflow as bf, cls_hot,
                       pinyin as pinyin_svc,
                       deploy as deploy_svc, em, index_levels, kronos, llm, llm_proxy,
                       market_service as ms, monitor, option_playbook as playbook,
-                      option_service as osvc, reversal, strategy, tape_flow as tf,
+                      option_service as osvc, push as push_svc, reversal, strategy, tape_flow as tf,
                       user_settings as usv,
                       vol)
 from services.universe import ETF_BY_CODE, ETFS, EXTERNAL, INDICES, NATIONAL_TEAM_ETFS
@@ -650,6 +650,34 @@ async def settings_update(payload: dict):
     if not usv.save(settings):
         return {"error": "设置写入失败"}
     return usv.view(settings)
+
+
+# --------------------------------------------------------------------------
+# 告警远程推送（Server酱 / Bark / 企业微信；密钥存 data/push_settings.json 不进 git）
+# --------------------------------------------------------------------------
+@router.get("/push/settings")
+async def push_settings_view():
+    """推送配置：密钥只回掩码。"""
+    return push_svc.view(push_svc.load())
+
+
+@router.put("/push/settings")
+async def push_settings_update(payload: dict):
+    """写入推送配置。key/url 留空或为掩码时保留原值；非法输入拒绝并给出原因。"""
+    merged = push_svc.merge_secret(payload, push_svc.load())
+    cfg, errors = push_svc.parse_config(merged)
+    if errors:
+        return {"error": "；".join(errors), "errors": errors}
+    if not push_svc.save(cfg):
+        return {"error": "推送设置写入失败"}
+    return push_svc.view(cfg)
+
+
+@router.post("/push/test")
+async def push_test():
+    """按当前已保存配置发一条【测试】推送，验证渠道连通性。"""
+    ok, msg = await push_svc.send_test()
+    return {"ok": ok, "msg": msg}
 
 
 # --------------------------------------------------------------------------

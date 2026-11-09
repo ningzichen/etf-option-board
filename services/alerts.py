@@ -36,6 +36,12 @@ async def publish(alert: dict) -> dict:
             dead.append(q)
     for q in dead:
         _subscribers.discard(q)
+    # 远程推送（尽力而为）：后台派发，失败不影响总线与 SSE 主链路
+    try:
+        from services import push
+        asyncio.get_running_loop().create_task(push.dispatch(alert))
+    except Exception:  # noqa: BLE001 — 推送永远不能弄脏主链路
+        pass
     return alert
 
 

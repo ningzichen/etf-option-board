@@ -71,6 +71,20 @@ export const api = {
     return r.json();
   },
   alerts: () => get("/alerts?limit=60"),
+  pushSettings: () => get("/push/settings"),
+  savePushSettings: async (body: {
+    enabled: boolean; channel: string; min_level: string;
+    key?: string; server?: string; url?: string;
+  }) => {
+    const r = await fetch(`${BASE}/push/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body),
+    });
+    return r.json();
+  },
+  pushTest: async () =>
+    (await fetch(`${BASE}/push/test`, { method: "POST" })).json(),
   reversalSignals: (code: string) => get(`/reversal/signals?code=${code}`),
   monitorCycle: async () => (await fetch(`${BASE}/monitor/cycle`, { method: "POST" })).json(),
 
