@@ -68,10 +68,18 @@ app.add_middleware(
 
 @app.middleware("http")
 async def _no_cache_html(request, call_next):
-    """HTML 一律 no-cache（每次重新校验），避免浏览器缓存旧 bundle 导致看不到新版。"""
+    """HTML 一律 no-cache（每次重新校验），避免浏览器缓存旧 bundle 导致看不到新版。
+
+    PWA 的 `manifest.webmanifest` / `sw.js` 同样不能长缓存：Chrome 会把清单缓存到
+    24 小时，改应用名/图标后，已安装的应用与标签页要等很久才更新。这两个文件本身很小，
+    用 `no-cache`（可缓存但每次必须回源校验）即可。
+    """
     resp = await call_next(request)
-    if "text/html" in resp.headers.get("content-type", ""):
+    ctype = resp.headers.get("content-type", "")
+    if "text/html" in ctype:
         resp.headers["Cache-Control"] = "no-store"
+    elif request.url.path.endswith(("manifest.webmanifest", "sw.js")):
+        resp.headers["Cache-Control"] = "no-cache"
     return resp
 
 
