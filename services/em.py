@@ -98,14 +98,15 @@ _V6_ADDR: dict[str, tuple[str, float]] = {}
 _V6_ADDR_TTL = 600.0
 
 
-async def _v6_addr(host: str) -> str | None:
+async def _v6_addr(host: str, deadline: float | None = None) -> str | None:
     """DoH 查 AAAA 并缓存（阿里/腾讯的 JSON 接口，走普通 IPv4 请求）。"""
     hit = _V6_ADDR.get(host)
     if hit and time.time() < hit[1]:
         return hit[0]
     for base in ("https://dns.alidns.com/resolve", "https://doh.pub/resolve"):
         try:
-            d = await _curl_json(base, {"name": host, "type": "AAAA"}, referer=base)
+            d = await _curl_json(base, {"name": host, "type": "AAAA"},
+                                 referer=base, deadline=deadline)
         except Exception:  # noqa: BLE001
             continue
         ips = [a.get("data") for a in (d or {}).get("Answer", [])
@@ -166,7 +167,7 @@ async def _curl_json_v6(url: str, params: dict | None = None,
     p = dict(params or {})
     p["_"] = int(time.time() * 1000)
     full = _build(url, p)
-    addr = await _v6_addr(host)
+    addr = await _v6_addr(host, deadline=deadline)
     attempts: list[list[str]] = []
     if addr:
         attempts.append(["--resolve", f"{host}:443:[{addr}]"])
@@ -180,7 +181,7 @@ async def _curl_json_v6(url: str, params: dict | None = None,
             err = f"try{i} 跳过（预算耗尽）"
             break
         timeout = _V6_TIMEOUT if budget is None else \
-            f"{max(1.0, min(float(_V6_TIMEOUT), budget)):.1f}"
+            f"{max(0.1, min(float(_V6_TIMEOUT), budget)):.1f}"
         proc = await asyncio.create_subprocess_exec(
             "curl", "-s", "-6", "-m", timeout, *extra,
             "-A", _UA, "-e", referer or _REFERER,
@@ -189,7 +190,19 @@ async def _curl_json_v6(url: str, params: dict | None = None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
-        out, _ = await proc.communicate()
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=(
+                None if budget is None else max(0.05, budget)))
+        except asyncio.TimeoutError as exc:
+            # 预算内没等到结果：终止并回收子进程（预算用尽不应留下孤儿 curl）
+            proc.kill()
+            await proc.wait()
+            raise _BudgetExceeded(f"curl6 执行超预算 {host}") from exc
+        except asyncio.CancelledError:
+            proc.kill()
+            with contextlib.suppress(Exception):
+                await proc.wait()
+            raise
         codes.append(proc.returncode)
         body = out.decode("utf-8", "replace").strip()
         if not body:
@@ -219,27 +232,76 @@ class _V6Busy(RuntimeError):
     """IPv6 专用槽排队超预算（通道未必坏，只是拥塞）。"""
 
 
+class _BudgetExceeded(RuntimeError):
+    """整次取数的总预算耗尽（拥塞兜底，不算通道故障）。"""
+
+
+# 槽等待的轮询间隔：预算按注入时钟计算，实际等待按 loop 时间分片推进，
+# 既保证生产环境语义正确，也让测试注入的假时钟推进能被及时感知。
+_BUDGET_POLL = 0.1
+
+
+async def _acquire_with_budget(sem: asyncio.Semaphore, deadline: float,
+                               what: str) -> None:
+    """在预算内获取一个信号量槽（等待受 `deadline` 约束，不再无限挂住）。
+
+    预算用 `time.monotonic()`（可被测试注入）计算；等待用 `asyncio.wait`
+    分片观察，超预算立即放弃并抛 `_BudgetExceeded`。
+
+    退出清理要区分三种状态：仍在等待（cancel 即可）、异常结束（无槽可还）、
+    **已经取得但父任务被取消**（cancel 撤不回已完成的获取，必须显式 release，
+    否则信号量额度会被永久吃掉，反复发生后并发能力持续衰减）。
+    """
+    if time.monotonic() >= deadline:
+        raise _BudgetExceeded(f"{what}排队超预算（预算已耗尽）")
+    task = asyncio.ensure_future(sem.acquire())
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise _BudgetExceeded(f"{what}排队超预算")
+            done, _ = await asyncio.wait({task}, timeout=min(remaining, _BUDGET_POLL))
+            if task in done:
+                return
+    except BaseException:
+        task.cancel()
+        with contextlib.suppress(BaseException):
+            await task
+        # 取消发生在"已取得之后"：acquire 不可撤销，槽位必须归还
+        if task.done() and not task.cancelled() and task.exception() is None:
+            sem.release()
+        raise
+
+
 @contextlib.asynccontextmanager
 async def _throttled(name: str, deadline: float):
     """按层次获取限流槽：IPv6 专用槽必须先于全局 `_SEM` 获取。
 
     调用方（`get_json`）原本先拿全局槽再进传输函数，若 IPv6 专用槽在内部排队，
     拥塞时 16 个全局槽会被等待者占满（实际只有 2 个 curl 在跑），共用 `_SEM`
-    的 H5/腾讯/直连请求会被一起拖住。这里把专用槽提到全局槽外层，并给它单独的
-    排队预算：等不到就抛 `_V6Busy`，让上层换下一条传输通道，而不是无限挂住。
+    的 H5/腾讯/直连请求会被一起拖住。这里把专用槽提到全局槽外层。
+
+    两把锁的等待都受整次取数预算约束：全局槽拥塞时最多等到预算耗尽，
+    然后抛 `_BudgetExceeded` 让上层换通道/降级，而不是无限挂住。
     """
     if name != "curl6":
-        async with _SEM:
+        await _acquire_with_budget(_SEM, deadline, "全局槽")
+        try:
             yield
+        finally:
+            _SEM.release()
         return
     budget = max(0.0, min(deadline - time.monotonic(), _V6_QUEUE_BUDGET))
     try:
-        await asyncio.wait_for(_V6_SEM.acquire(), timeout=budget)
-    except asyncio.TimeoutError as exc:
-        raise _V6Busy(f"IPv6 通道排队超预算（>{budget:.1f}s）") from exc
+        await _acquire_with_budget(_V6_SEM, time.monotonic() + budget, "IPv6 专用槽")
+    except _BudgetExceeded as exc:
+        raise _V6Busy(str(exc)) from exc
     try:
-        async with _SEM:
+        await _acquire_with_budget(_SEM, deadline, "全局槽")
+        try:
             yield
+        finally:
+            _SEM.release()
     finally:
         _V6_SEM.release()
 
@@ -303,19 +365,36 @@ def _hdr_args(headers: dict[str, str] | None) -> list[str]:
 
 async def _curl_json(url: str, params: dict | None = None,
                      referer: str | None = None,
-                     headers: dict[str, str] | None = None) -> object:
+                     headers: dict[str, str] | None = None,
+                     deadline: float | None = None) -> object:
     p = dict(params or {})
     p["_"] = int(time.time() * 1000)
     full = _build(url, p)
     ua = (headers or {}).get("User-Agent") or (headers or {}).get("user-agent") or _UA
+    # -m 尽量贴合剩余预算（下限 0.1 防止负数/0），wait_for 仅作保险并负责 kill/reap
+    timeout = "8"
+    if deadline is not None:
+        timeout = f"{max(0.1, min(8.0, deadline - time.monotonic())):.1f}"
     proc = await asyncio.create_subprocess_exec(
-        "curl", "-s", "-m", "8", "-A", ua, "-e", referer or _REFERER,
+        "curl", "-s", "-m", timeout, "-A", ua, "-e", referer or _REFERER,
         "-H", "Accept: application/json, text/plain, */*", *_hdr_args(headers),
         full,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL,
     )
-    out, _ = await proc.communicate()
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=(
+            None if deadline is None else max(0.05, deadline - time.monotonic())))
+    except asyncio.TimeoutError as exc:
+        # 预算内没等到结果：终止并回收子进程，不能只释放信号量让它继续跑
+        proc.kill()
+        await proc.wait()
+        raise _BudgetExceeded(f"curl 执行超预算 {_host_of(url)}") from exc
+    except asyncio.CancelledError:
+        proc.kill()
+        with contextlib.suppress(Exception):
+            await proc.wait()
+        raise
     return json.loads(out.decode("utf-8", "replace"))
 
 
@@ -347,12 +426,20 @@ async def get_json(url: str, params: dict | None = None, ttl: float = 3.0,
     async def _direct():
         h = {"Referer": referer} if referer else {}
         h.update(headers or {})
-        r = await _client().get(_build(url, params), headers=h or None)
+        # httpx.Timeout 是分阶段（connect/read/write）计时，read 超时按"每个数据块"
+        # 计算，服务端慢速滴数据时整个请求仍可能远超总预算 —— 这里必须再包一层
+        # 以剩余预算为准的总时限（取消协程无副作用，连接会被回收）
+        try:
+            r = await asyncio.wait_for(
+                _client().get(_build(url, params), headers=h or None),
+                timeout=max(0.05, deadline - time.monotonic()))
+        except asyncio.TimeoutError as exc:
+            raise _BudgetExceeded(f"direct 执行超预算 {hostkey}") from exc
         r.raise_for_status()
         return r.json()
 
     async def _curl():
-        return await _curl_json(url, params, referer, headers)
+        return await _curl_json(url, params, referer, headers, deadline=deadline)
 
     async def _curl6():
         return await _curl_json_v6(url, params, referer, deadline=deadline)
@@ -371,13 +458,18 @@ async def get_json(url: str, params: dict | None = None, ttl: float = 3.0,
     used = None
     v6_empty = False
     v6_busy = False
+    budget_out = False
     # 东财限流：单次成功率约 30~50%，失败即重试（direct 被 WAF 拒绝时很快失败）
     for attempt in range(n_tries):
         for name, fn in transports:
-            if time.monotonic() >= deadline:
+            # 预算一旦判定耗尽就停止尝试（不依赖下一次时钟检查"顺带"挡住）
+            if budget_out or time.monotonic() >= deadline:
                 break
             try:
                 async with _throttled(name, deadline):
+                    if time.monotonic() >= deadline:
+                        # 拿到槽时预算已尽：不再发起传输（review 指出的盲区）
+                        raise _BudgetExceeded(f"预算耗尽（发起 {name} 前）")
                     data = await fn()
             except Exception as exc:  # noqa: BLE001
                 if isinstance(exc, _V6EmptyReply):
@@ -385,20 +477,22 @@ async def get_json(url: str, params: dict | None = None, ttl: float = 3.0,
                 elif isinstance(exc, _V6Busy):
                     # 排队超预算是"拥塞"，不是通道故障，不能计入熔断
                     v6_busy = True
+                elif isinstance(exc, _BudgetExceeded):
+                    budget_out = True
                 log.debug("em fetch %s via %s 失败: %s", hostkey, name, exc)
                 data = None
             if data is not None:
                 used = name
                 break
-        if data is not None:
+        if data is not None or budget_out:
             break
-        if attempt < n_tries - 1:
+        if attempt < n_tries - 1 and time.monotonic() < deadline - _RETRY_DELAY:
             await asyncio.sleep(_RETRY_DELAY)
 
     if _v6_host(hostkey):
         if data is not None:
             _v6_ok(hostkey)
-        elif not _v6_dead(hostkey) and not v6_empty and not v6_busy:
+        elif not _v6_dead(hostkey) and not v6_empty and not v6_busy and not budget_out:
             _v6_fail(hostkey)
 
     if data is None:
