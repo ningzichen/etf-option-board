@@ -359,7 +359,8 @@ export function EmFlowPage() {
                   <div className="flex min-h-0 flex-1 flex-col">
                     <div className="min-h-0 flex-[3]">
                       <MoneyLinesChart id={`em-${seriesKind}-${effectiveCode}`} axis={series.axis}
-                        series={dimSeries as any} height="100%" maxLines={5} endLabels />
+                        series={dimSeries as any} height="100%" maxLines={5} endLabels
+                        linkGroup={`emflow-${seriesKind}-${effectiveCode}`} />
                     </div>
                     <div className="mt-1 border-t border-border/40 pt-1">
                       <div className="flex items-center gap-3 px-1 pb-0.5 text-[10px] text-muted-foreground">
@@ -381,6 +382,7 @@ export function EmFlowPage() {
                           date={volume?.date}
                           prevDate={volume?.prev_date}
                           height="100%"
+                          linkGroup={`emflow-${seriesKind}-${effectiveCode}`}
                         />
                       </div>
                     </div>

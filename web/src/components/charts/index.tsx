@@ -1,10 +1,23 @@
 import ReactECharts from "echarts-for-react";
+// 仅用于把主图与副图（成交量）连成同一 group，让十字光标/竖线互相穿透
+import * as echarts from "echarts";
 import { Maximize2, Minimize2 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { alignToAxis, minuteOf, sameDayAs, trimSession } from "@/lib/series";
 import { signedFlow } from "@/lib/format";
 import { FlowEndLabels, type EndLabelItem } from "@/components/charts/endLabels";
 import { cn } from "@/lib/utils";
+
+/** 把图表加入同一 ECharts group：同一 group 的实例会同步十字光标/竖线与 tooltip。 */
+function joinGroup(chart: any, group?: string) {
+  if (!chart || !group || chart.isDisposed?.()) return;
+  try {
+    chart.group = group;
+    echarts.connect(group);
+  } catch {
+    /* 连接失败不影响图表本身 */
+  }
+}
 
 const AXIS = "#71717a";
 const SPLIT = "rgba(0,0,0,0.07)";
@@ -752,7 +765,7 @@ function NowMarker({
 
 export function MoneyLinesChart({
   id, axis, series, height = 320, maxLines = 8, vLines, endLabels = false,
-  extra = [], lineWidth = 1.4, nowX,
+  extra = [], lineWidth = 1.4, nowX, linkGroup,
 }: {
   id: string;
   axis: string[];
@@ -770,6 +783,8 @@ export function MoneyLinesChart({
   /** 当前时间位置（形如 "14:12"，必须是 axis 里的刻度）：画一条实线 + 顶部时间标签。
    *  传 null/undefined 不画；只在「当天 + 盘中」由调用方传入，历史/休市不显示。 */
   nowX?: string | null;
+  /** 与副图共享同一 group：十字光标/竖线会同步到同组图表 */
+  linkGroup?: string;
 }) {
   const shown = (series ?? []).slice(0, maxLines);
   const extras = extra ?? [];
@@ -955,7 +970,7 @@ export function MoneyLinesChart({
   return (
     <div className="relative" style={{ height }}>
       <ReactECharts key={id} option={withGuides(option)} notMerge style={{ height: "100%" }}
-        onChartReady={setChart} />
+        onChartReady={(c: any) => { setChart(c); joinGroup(c, linkGroup); }} />
       {nowX && axis.includes(nowX) ? (
         <NowMarker chart={chart} index={axis.indexOf(nowX)} label={nowX} gridTop={10} />
       ) : null}
@@ -1375,7 +1390,7 @@ export function BoardFlowChart({
 
 /** 成交量对比副图：当日 vs 前一交易日的每分钟成交量（万手）。 */
 export function VolumeCompareChart({
-  id, axis, today, prev, height = 150, prevDate, date,
+  id, axis, today, prev, height = 150, prevDate, date, linkGroup,
 }: {
   id: string;
   axis: string[];
@@ -1384,6 +1399,8 @@ export function VolumeCompareChart({
   height?: number | string;
   date?: string;
   prevDate?: string;
+  /** 与主图共享同一 group：十字光标/竖线会同步 */
+  linkGroup?: string;
 }) {
   const toWan = (v: number | null) => (v == null ? null : Math.round((v / 1e4) * 100) / 100);
   const option = useMemo(() => ({
@@ -1456,5 +1473,8 @@ export function VolumeCompareChart({
   }), [axis, today, prev, date, prevDate]);
 
   if (!axis.length) return null;
-  return <ReactECharts key={id} option={option} notMerge style={{ height }} />;
+  return (
+    <ReactECharts key={id} option={option} notMerge style={{ height }}
+      onChartReady={(c: any) => joinGroup(c, linkGroup)} />
+  );
 }
