@@ -194,3 +194,57 @@ def test_retry_sleep_skipped_when_budget_tight(monkeypatch, clock):
         assert not sleeps                 # 剩余预算不足一个重试间隔 → 不空等
 
     asyncio.run(main())
+
+
+def test_slot_returned_when_cancelled_right_after_acquire(clock):
+    """P1：刚取得槽位就被取消，槽位必须归还（否则并发额度被永久吃掉）。"""
+    async def main():
+        holder = None
+
+        class CancelAfterAcquire(asyncio.Semaphore):
+            """取得槽位后立即取消等待者，模拟"拿到位置那一刻被取消"。"""
+
+            async def acquire(self):
+                ok = await super().acquire()
+                if holder is not None:
+                    holder.cancel()
+                return ok
+
+        sem = CancelAfterAcquire(1)
+        holder = asyncio.ensure_future(
+            em._acquire_with_budget(sem, clock[0] + 30, "全局槽"))  # noqa: SLF001
+        outcome = await asyncio.gather(holder, return_exceptions=True)
+        assert isinstance(outcome[0], asyncio.CancelledError)
+        assert sem._value == 1            # 位置已归还，不是 0
+
+    asyncio.run(main())
+
+
+def test_direct_aborted_when_budget_expires(monkeypatch, clock):
+    """P2：direct 必须受总预算约束（httpx 的分阶段超时不是整次请求的总时限）。"""
+    async def main():
+        curl_calls: list[str] = []
+
+        async def hanging_get(*args, **kwargs):
+            await asyncio.Event().wait()   # 永不返回，模拟服务端慢速滴数据
+
+        async def fake_curl(url, params=None, referer=None, headers=None, deadline=None):
+            curl_calls.append("curl")
+            return {"should-not-happen": True}
+
+        monkeypatch.setattr(em, "_client", lambda: SimpleNamespace(get=hanging_get))
+        monkeypatch.setattr(em, "_curl_json", fake_curl)
+        monkeypatch.setattr(em, "_REQUEST_BUDGET", 0.05)  # noqa: SLF001
+        monkeypatch.setitem(em._MEMO, "emdatah5.eastmoney.com",
+                            ("direct", 999999.0))  # noqa: SLF001 — 让 direct 先试
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        result = await asyncio.wait_for(
+            em.get_json("https://emdatah5.eastmoney.com/x", ttl=0, force=True),
+            timeout=3)
+        elapsed = loop.time() - started
+        assert result is None             # 预算耗尽 → 降级返回，不挂住
+        assert elapsed < 1.0              # 远小于等待上限，说明被预算截断
+        assert not curl_calls             # 预算已尽，不再发起下一条通道
+
+    asyncio.run(main())

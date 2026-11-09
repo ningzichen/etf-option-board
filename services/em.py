@@ -247,6 +247,10 @@ async def _acquire_with_budget(sem: asyncio.Semaphore, deadline: float,
 
     预算用 `time.monotonic()`（可被测试注入）计算；等待用 `asyncio.wait`
     分片观察，超预算立即放弃并抛 `_BudgetExceeded`。
+
+    退出清理要区分三种状态：仍在等待（cancel 即可）、异常结束（无槽可还）、
+    **已经取得但父任务被取消**（cancel 撤不回已完成的获取，必须显式 release，
+    否则信号量额度会被永久吃掉，反复发生后并发能力持续衰减）。
     """
     if time.monotonic() >= deadline:
         raise _BudgetExceeded(f"{what}排队超预算（预算已耗尽）")
@@ -263,6 +267,9 @@ async def _acquire_with_budget(sem: asyncio.Semaphore, deadline: float,
         task.cancel()
         with contextlib.suppress(BaseException):
             await task
+        # 取消发生在"已取得之后"：acquire 不可撤销，槽位必须归还
+        if task.done() and not task.cancelled() and task.exception() is None:
+            sem.release()
         raise
 
 
@@ -419,9 +426,15 @@ async def get_json(url: str, params: dict | None = None, ttl: float = 3.0,
     async def _direct():
         h = {"Referer": referer} if referer else {}
         h.update(headers or {})
-        # httpx.Timeout(6.0, connect=2.5) 已把 direct 限制在远小于总预算的时长内，
-        # 无需再包 wait_for（传输里只有 curl 子进程需要预算兜底）
-        r = await _client().get(_build(url, params), headers=h or None)
+        # httpx.Timeout 是分阶段（connect/read/write）计时，read 超时按"每个数据块"
+        # 计算，服务端慢速滴数据时整个请求仍可能远超总预算 —— 这里必须再包一层
+        # 以剩余预算为准的总时限（取消协程无副作用，连接会被回收）
+        try:
+            r = await asyncio.wait_for(
+                _client().get(_build(url, params), headers=h or None),
+                timeout=max(0.05, deadline - time.monotonic()))
+        except asyncio.TimeoutError as exc:
+            raise _BudgetExceeded(f"direct 执行超预算 {hostkey}") from exc
         r.raise_for_status()
         return r.json()
 
@@ -449,7 +462,8 @@ async def get_json(url: str, params: dict | None = None, ttl: float = 3.0,
     # 东财限流：单次成功率约 30~50%，失败即重试（direct 被 WAF 拒绝时很快失败）
     for attempt in range(n_tries):
         for name, fn in transports:
-            if time.monotonic() >= deadline:
+            # 预算一旦判定耗尽就停止尝试（不依赖下一次时钟检查"顺带"挡住）
+            if budget_out or time.monotonic() >= deadline:
                 break
             try:
                 async with _throttled(name, deadline):
