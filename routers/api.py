@@ -1526,6 +1526,10 @@ async def em_flow_volume(target_type: str = Query("index",
         return {"axis": [], "today": [], "prev": [], "error": "上游没有分时成交量"}
 
     days = sorted(by_day)
+    if date and date not in by_day:
+        # 上游只有最近 5 天；历史日期不要拿今天的量冒充
+        return {"date": date, "prev_date": "", "axis": [], "today": [], "prev": [],
+                "error": "该日期超出成交量分时覆盖范围（仅最近 5 个交易日）"}
     target = date if date in by_day else days[-1]
     earlier = [d0 for d0 in days if d0 < target]
     prev_day = earlier[-1] if earlier else ""
