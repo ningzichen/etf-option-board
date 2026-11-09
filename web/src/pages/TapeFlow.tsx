@@ -8,7 +8,7 @@ import { DayTag } from "@/components/DayTag";
 import { MoneyLinesChart } from "@/components/charts";
 import { api } from "@/lib/api";
 import { usePolling } from "@/lib/usePolling";
-import { dateWithWeek, flowMoney, signedFlow } from "@/lib/format";
+import { dateWithWeek, flowMoney, signedFlow, todayStr } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const PRESETS = [
@@ -149,6 +149,21 @@ export function TapeFlowPage() {
   const updated = meta.updated_at || health?.state?.last_run || "";
   const err = data?.error;
   const phase = phaseOf(new Date(nowTs));
+
+  // 「现在」竖线：只在「看的是今天 + 盘中」时给，历史日期/午休/收盘后不画。
+  // 位置按分钟刻度量，每秒只更新一次字符串（同日同分时 setState 相同值会被 React 跳过）。
+  const [nowLabel, setNowLabel] = useState("");
+  useEffect(() => {
+    const tick = () => {
+      const d = new Date();
+      setNowLabel(`${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, []);
+  const liveNow = data?.date === todayStr()
+    && (phase === "morning" || phase === "afternoon");
 
   const dateOptions = useMemo(() => {
     const out = [...dates];
@@ -359,6 +374,7 @@ export function TapeFlowPage() {
               lineWidth={2}
               height="100%"
               endLabels
+              nowX={liveNow ? nowLabel : null}
             />
           </div>
 

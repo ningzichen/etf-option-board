@@ -710,7 +710,7 @@ const EXTRA_COLORS = ["#0ea5e9", "#64748b", "#e11d48", "#ca8a04"];
 
 export function MoneyLinesChart({
   id, axis, series, height = 320, maxLines = 8, mode = "line", vLines, endLabels = false,
-  extra = [], lineWidth = 1.4,
+  extra = [], lineWidth = 1.4, nowX,
 }: {
   id: string;
   axis: string[];
@@ -727,6 +727,9 @@ export function MoneyLinesChart({
   vLines?: string[];
   /** 右侧「虚线 + 名称/值」标签（四维资金用） */
   endLabels?: boolean;
+  /** 当前时间位置（形如 "14:12"，必须是 axis 里的刻度）：画一条实线 + 顶部时间标签。
+   *  传 null/undefined 不画；只在「当天 + 盘中」由调用方传入，历史/休市不显示。 */
+  nowX?: string | null;
 }) {
   const shown = (series ?? []).slice(0, maxLines);
   const extras = extra ?? [];
@@ -882,6 +885,19 @@ export function MoneyLinesChart({
       vLines.forEach((v) => data.push({ xAxis: v, lineStyle: { color: "#9ca3af", type: [5, 4], width: 1.5 } }));
     } else {
       axis.filter((t) => isHalfHour(t)).forEach((t) => data.push({ xAxis: t, lineStyle: { color: "#6b7280", type: [4, 4], width: 1 } }));
+    }
+    // 「现在」竖线：与半小时灰虚线区分——实线 + 顶部时间标签。
+    // 只认 axis 里存在的刻度，否则 ECharts 会把它画到 0 号位。
+    if (nowX && axis.includes(nowX)) {
+      data.push({
+        xAxis: nowX,
+        lineStyle: { color: "#111827", type: "solid", width: 1.2 },
+        label: {
+          show: true, formatter: `现在 ${nowX}`, position: "insideEndTop",
+          color: "#111827", fontSize: 10, fontWeight: 500,
+          backgroundColor: "rgba(255,255,255,0.88)", padding: [2, 4], borderRadius: 3,
+        },
+      });
     }
     data.push({ yAxis: 0, lineStyle: { color: "#9ca3af", type: "solid", width: 1 } });
     opt.series[0].markLine = { symbol: "none", silent: true, label: { show: false }, data };
@@ -1198,7 +1214,20 @@ export function BoardFlowChart({
         times.filter((t) => isHalfHour(t)).forEach((t) => data.push({ xAxis: t, lineStyle: { color: "#6b7280", type: [4, 4], width: 1 } }));
       }
       // 0 轴：一条 1px 直线，不带任何刻度/标签
-      data.push({ yAxis: 0, lineStyle: { color: "#9ca3af", type: "solid", width: 1 } });
+      // 「现在」竖线：与半小时灰虚线区分——实线 + 顶部时间标签。
+    // 只认 axis 里存在的刻度，否则 ECharts 会把它画到 0 号位。
+    if (nowX && axis.includes(nowX)) {
+      data.push({
+        xAxis: nowX,
+        lineStyle: { color: "#111827", type: "solid", width: 1.2 },
+        label: {
+          show: true, formatter: `现在 ${nowX}`, position: "insideEndTop",
+          color: "#111827", fontSize: 10, fontWeight: 500,
+          backgroundColor: "rgba(255,255,255,0.88)", padding: [2, 4], borderRadius: 3,
+        },
+      });
+    }
+    data.push({ yAxis: 0, lineStyle: { color: "#9ca3af", type: "solid", width: 1 } });
       series[0].markLine = { symbol: "none", silent: true, label: { show: false }, data };
     }
 
