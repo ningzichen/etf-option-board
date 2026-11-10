@@ -19,6 +19,9 @@ type Action = {
   side: "call" | "put"; side_label: string;
   strike: number | null; last: number | null; delta: number | null;
   leverage: number | null; spread: number | null; days: number | null;
+  month: number | null;
+  /** 与专业模式同一判定：single_call / single_put */
+  strategy: string; strategy_label: string;
   breakeven_pct: number | null;
   verdict: { label: string; strength_label: string };
   reasons: Reason[];
@@ -30,6 +33,8 @@ type Today = {
   threshold: number;
   items: TodayItem[];
   action: Action | null;
+  /** 有方向但不给动作时，专业模式规则拦下的原因（临期排除当月 / 高 IV 改价差） */
+  action_note: string | null;
   notes: string[];
 };
 
@@ -138,7 +143,8 @@ export function TodayPage() {
             <>
               <div className="text-sm font-medium">{data.action.name}</div>
               <div className="mt-0.5 text-[11px] text-muted-foreground">
-                {data.action.etf_name} · {data.action.days != null ? `${data.action.days} 天到期 · ` : ""}
+                {data.action.etf_name} · {data.action.month ? `${data.action.month} 月 · ` : ""}
+                {data.action.days != null ? `${data.action.days} 天到期 · ` : ""}
                 现价 {data.action.last ?? "—"} · Δ {data.action.delta?.toFixed(2) ?? "—"}
               </div>
               <div className="mt-3 rounded-lg bg-muted/50 p-2.5 text-xs leading-relaxed">
@@ -161,6 +167,7 @@ export function TodayPage() {
                 方向依据：{data.action.reasons.map((r) => r.text).join("；")}
               </div>
               <div className="mt-2 text-[11px] text-muted-foreground">
+                {data.action.strategy_label ? `策略：${data.action.strategy_label} · ` : ""}
                 入场、止损、手数上限见专业模式的策略卡；先定止损再进场。
               </div>
             </>
@@ -168,6 +175,11 @@ export function TodayPage() {
             <div className="py-6 text-center text-xs text-muted-foreground">
               今天没有值得做的方向。
               <div className="mt-1">空仓等待也是决策，不必强行找单。</div>
+              {data.action_note && (
+                <div className="mx-auto mt-2 max-w-md text-[11px] leading-relaxed">
+                  {data.action_note}
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -72,6 +72,9 @@ async def _one(etf: dict, dirs: dict, calib: dict) -> list[dict]:
     rows = osvc.rank_candidates(ch, side, top=4, trend=trend, levels=levels,
                                 spot=und.get("price"), calib=calib)
     amp = und.get("amplitude")
+    # ATM IV 20 日分位：与专业模式 decision.select_strategy 同一输入口径，
+    # 下游（简洁模式选合约）据此判「高 IV 是否该改价差」。
+    iv_pct = (ch.get("stats") or {}).get("atm_iv_pctl20")
     out = []
     for c in rows:
         q = float(c.get("score") or 0)
@@ -87,7 +90,7 @@ async def _one(etf: dict, dirs: dict, calib: dict) -> list[dict]:
             "direction": direction, "trend_score": d.get("score"),
             "trend_aligned": bool(c.get("trend_aligned")),
             "underlying_price": und.get("price"), "underlying_pct": pct,
-            "underlying_amplitude": amp,
+            "underlying_amplitude": amp, "iv_pct": iv_pct,
             "quality": round(q, 1), "vol": v,
             "pick_score": round(_W_Q * q + _W_V * v, 1),
             "reasons": (c.get("reasons") or [])[:3],

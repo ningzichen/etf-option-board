@@ -175,15 +175,50 @@ def risk_notes(*, expiry: list[dict] | None, alerts: list[dict] | None,
     return notes[:4]
 
 
-def _action(picks: list[dict], items: list[dict]) -> dict | None:
-    """只从非观望标的、且方向一致的优选合约里挑一条；没有就返回 None。"""
+def _strategy(direction: str, iv_pct, expiry: list[dict] | None) -> dict:
+    """复用专业模式的策略判定（``decision.select_strategy``），口径完全一致。
+
+    专业模式（``strategy.build_plan``）用同一函数的输出去过滤合约月份、决定是否
+    改用垂直价差；简洁模式若自己另判一套，两个入口必然给出互相冲突的建议。
+    """
+    from services import decision        # 延迟导入：避免模块级连带 option_service
+
+    cal = expiry or []
+    front = cal[0].get("days_left") if cal else None
+    nxt = cal[1].get("days_left") if len(cal) > 1 else None
+    return decision.select_strategy(direction, iv_pct,
+                                    days_to_expiry=front, next_month_days=nxt)
+
+
+def _action(picks: list[dict], items: list[dict],
+            expiry: list[dict] | None = None) -> tuple[dict | None, str | None]:
+    """从非观望标的、方向一致、且**通过专业模式策略判定**的合约里挑一条。
+
+    返回 ``(动作, 无动作原因)``。临期排除当月、高 IV 改价差这两条规则必须在这里
+    生效，否则用户切换模式后会看到两个互相冲突的操作建议。
+    """
     by_code = {i["code"]: i for i in items}
+    cal = expiry or []
+    next_month = cal[1].get("month") if len(cal) > 1 else None
+    note = None
     for p in picks:
         item = by_code.get(p.get("etf_code"))
         if not item or item["tone"] == "neutral":
             continue
         want = "call" if item["tone"] == "bull" else "put"
         if p.get("side") != want:
+            continue
+        strat = _strategy(want, p.get("iv_pct"), cal)
+        kind = strat.get("strategy")
+        if kind == "wait":
+            note = note or strat.get("reason")
+            continue
+        if kind == "vertical":
+            # 专业模式要求用价差降成本时，单张合约不能包装成「今天只做这一笔」
+            note = note or f"{strat.get('reason')} 简洁模式不给单腿建议，价差组合请在专业模式查看。"
+            continue
+        if strat.get("month") == "next" and next_month and p.get("month") != next_month:
+            note = note or strat.get("reason")      # 当月临期 → 只认次月合约
             continue
         return {
             "etf_code": p.get("etf_code"), "etf_name": p.get("etf_name"),
@@ -192,11 +227,13 @@ def _action(picks: list[dict], items: list[dict]) -> dict | None:
             "strike": p.get("strike"), "last": p.get("last"),
             "delta": p.get("delta"), "leverage": p.get("leverage"),
             "spread": p.get("spread"), "days": p.get("days"),
+            "month": p.get("month"),
+            "strategy": kind, "strategy_label": strat.get("label"),
             "breakeven_pct": breakeven_pct(p),
             "verdict": {"label": item["label"], "strength_label": item["strength_label"]},
             "reasons": item["reasons"],
-        }
-    return None
+        }, None
+    return None, note
 
 
 def compose(*, directions: dict, etf_meta: list[dict], picks: dict | list | None,
@@ -220,12 +257,14 @@ def compose(*, directions: dict, etf_meta: list[dict], picks: dict | list | None
     items.sort(key=lambda i: (i["tone"] == "neutral", -i["bar_pct"], i["code"]))
 
     all_neutral = all(i["tone"] == "neutral" for i in items) if items else True
-    act = _action(pick_items, items)
+    act, act_note = _action(pick_items, items, expiry)
     return {
         "ts": now.strftime("%H:%M"),
         "session": session_label(now),
         "threshold": THRESHOLD,
         "items": items,
         "action": act,
+        # 有方向但不给动作时，说明是专业模式的哪条规则拦下的（临期/价差/观望）
+        "action_note": None if act else act_note,
         "notes": risk_notes(expiry=expiry, alerts=alerts, now=now, all_neutral=all_neutral),
     }

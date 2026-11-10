@@ -276,3 +276,72 @@ class TestCompose:
         out = self._compose(directions={})
         assert out["items"] and all(i["tone"] == "neutral" for i in out["items"])
         assert out["action"] is None
+
+
+# ---------------------------------------------------------------------------
+# 回归（review P1）：动作卡必须复用专业模式的选合约规则
+# 口径来源 services/decision.select_strategy：临期排除当月、高 IV 改价差
+# ---------------------------------------------------------------------------
+
+class TestActionFollowsStrategyRules:
+    """简洁模式不能给出与专业模式冲突的建议。"""
+
+    DIRS = {"510300": _d(46.3, {"标的5分钟动量": 12.5, "关联指数": 9.0}),
+            "588000": _d(6.4), "159915": _d(-52.0, {"关联指数": -18.0})}
+
+    FRONT_ONLY = [{"code": "10007890", "name": "300ETF购11月4000", "etf_code": "510300",
+                   "etf_name": "沪深300ETF华泰柏瑞", "side": "call", "type": "call",
+                   "strike": 4.0, "last": 0.041, "delta": 0.42, "leverage": 21.0,
+                   "spread": 1.4, "pick_score": 78.0, "month": 11, "days": 2}]
+    NEXT_ONLY = [{"code": "10007891", "name": "300ETF购12月4000", "etf_code": "510300",
+                  "etf_name": "沪深300ETF华泰柏瑞", "side": "call", "type": "call",
+                  "strike": 4.0, "last": 0.0612, "delta": 0.48, "leverage": 19.8,
+                  "spread": 1.1, "pick_score": 72.0, "month": 12, "days": 30}]
+
+    def _compose(self, *, expiry, items, iv_pct=None):
+        picks = {"items": [{**p, "iv_pct": iv_pct} for p in items]}
+        return hz.compose(directions=self.DIRS, etf_meta=ETFS, picks=picks,
+                          expiry=expiry, alerts=[], now=NOW_PM)
+
+    def test_critical_front_month_is_excluded(self):
+        # 当月只剩 2 天 → 专业模式排除新开当月；当月合约哪怕综合分更高也不能当动作
+        out = self._compose(
+            expiry=[{"month": 11, "days_left": 2}, {"month": 12, "days_left": 30}],
+            items=self.FRONT_ONLY + self.NEXT_ONLY, iv_pct=50.0)
+        assert out["action"] is not None
+        assert out["action"]["month"] == 12
+        assert out["action"]["code"] == "10007891"
+
+    def test_critical_front_month_without_next_month_waits(self):
+        # 只有当月可用且临期 → 专业模式明确观望，简洁模式不能给动作
+        out = self._compose(expiry=[{"month": 11, "days_left": 2}],
+                            items=self.FRONT_ONLY, iv_pct=50.0)
+        assert out["action"] is None
+        assert out["action_note"] and "临期" in out["action_note"]
+
+    def test_high_iv_does_not_recommend_single_leg(self):
+        # IV 分位 ≥75：专业模式改垂直价差，简洁模式不得把单腿包装成「今天只做这一笔」
+        out = self._compose(expiry=[{"month": 12, "days_left": 30}],
+                            items=self.NEXT_ONLY, iv_pct=82.0)
+        assert out["action"] is None
+        assert out["action_note"] and "价差" in out["action_note"]
+
+    def test_low_iv_keeps_single_leg(self):
+        out = self._compose(expiry=[{"month": 12, "days_left": 30}],
+                            items=self.NEXT_ONLY, iv_pct=18.0)
+        assert out["action"] is not None
+        assert out["action"]["month"] == 12
+        assert out["action"]["strategy"] == "single_call"
+
+    def test_missing_iv_percentile_degrades_to_single_leg(self):
+        # IV 分位样本不足：专业模式按中性处理（不改变策略类型）
+        out = self._compose(expiry=[{"month": 12, "days_left": 30}],
+                            items=self.NEXT_ONLY, iv_pct=None)
+        assert out["action"] is not None
+        assert out["action"]["strategy"] == "single_call"
+
+    def test_action_carries_strategy_label(self):
+        out = self._compose(expiry=[{"month": 12, "days_left": 30}],
+                            items=self.NEXT_ONLY, iv_pct=50.0)
+        assert out["action"]["strategy_label"]
+        assert out["action_note"] is None
