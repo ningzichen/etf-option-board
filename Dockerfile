@@ -32,7 +32,9 @@ COPY requirements.txt ./
 RUN pip install -r requirements.txt
 
 # 代码归 app 用户：/api/admin/deploy 的 py_compile 要在 /app 和各子目录写 __pycache__
-COPY --chown=app:app app.py config.py ./
+# 根目录的 .py 是逐个列的（没有通配），新增根级模块必须同步加进来，
+# 否则镜像能构建成功、运行时才 ModuleNotFoundError。
+COPY --chown=app:app app.py config.py paths.py ./
 COPY --chown=app:app routers ./routers
 COPY --chown=app:app services ./services
 COPY --chown=app:app scripts ./scripts

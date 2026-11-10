@@ -82,3 +82,34 @@ jobs:
             VCS_REF=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # 多架构产物不会落到本机 docker，这里用同一份缓存在 amd64 上重打一次并 --load。
+      # 目的只有一个：真正把容器跑起来。file 漏拷、依赖缺失这类问题构建阶段看不出来，
+      # 只有启动时才炸，而用户 pull 到的就是这个炸掉的镜像。
+      - name: 冒烟启动容器并检查 /api/health
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker rm -f etf-smoke >/dev/null 2>&1 || true
+          docker buildx build --platform linux/amd64 --load \
+            --cache-from type=gha -t etf-board:smoke .
+          docker run -d --name etf-smoke -p 127.0.0.1:6799:6799 etf-board:smoke
+          for i in $(seq 1 45); do
+            if curl -fsS --max-time 3 http://127.0.0.1:6799/api/health >/dev/null; then
+              echo "health ok（第 ${i} 次探测）"
+              exit 0
+            fi
+            if [ "$(docker inspect -f '{{.State.Running}}' etf-smoke)" != "true" ]; then
+              echo "容器已退出，日志如下："
+              docker logs etf-smoke
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "90 秒内 /api/health 未就绪，日志如下："
+          docker logs etf-smoke
+          exit 1
+
+      - name: 清理冒烟容器
+        if: always()
+        run: docker rm -f etf-smoke >/dev/null 2>&1 || true
