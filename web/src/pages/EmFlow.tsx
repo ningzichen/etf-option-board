@@ -251,6 +251,10 @@ export function EmFlowPage() {
     const map = new Map(volume.axis.map((t, i) => [t, arr[i]] as const));
     return (series?.axis ?? []).map((t) => map.get(t) ?? null);
   }, [volume, series?.axis]);
+  // 副图数据必须 memo：在 JSX 里现场 alignVolume(...) 每次渲染都是新数组，顶栏时钟每秒重渲染
+  // → 副图 option 每秒重建、tooltip 闪烁（见 AGENTS.md「图表引用稳定」）
+  const volToday = useMemo(() => alignVolume(volume?.today), [alignVolume, volume]);
+  const volPrev = useMemo(() => alignVolume(volume?.prev), [alignVolume, volume]);
 
   // 前一交易日 4 维（库里已有历史时才有）：用同一组颜色、60% 透明度叠加
   const prevDate = (series as any)?.prev_date as string | undefined;
@@ -440,8 +444,8 @@ export function EmFlowPage() {
                         <VolumeCompareChart
                           id={`vol-${seriesKind}-${effectiveCode}`}
                           axis={series.axis}
-                          today={alignVolume(volume?.today)}
-                          prev={alignVolume(volume?.prev)}
+                          today={volToday}
+                          prev={volPrev}
                           date={volume?.date}
                           prevDate={volume?.prev_date}
                           height="100%"

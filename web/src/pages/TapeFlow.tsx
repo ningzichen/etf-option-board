@@ -147,11 +147,13 @@ export function TapeFlowPage() {
     () => (data?.series ?? []).map((s: any) => ({ code: s.code, name: s.name, values: s.values })),
     [data]);
   // 叠加价格线：A股平均股价 / 上证指数（走第二 Y 轴）
-  const prices = (data?.prices ?? []) as { key: string; name: string; values: (number | null)[]; last?: number }[];
-  const extra = prices
+  const prices = useMemo(() => data?.prices ?? [], [data]) as { key: string; name: string; values: (number | null)[]; last?: number }[];
+  // useMemo：顶栏时钟每秒重渲染，内联 map 出新数组会让图表每秒重建（见 AGENTS.md「图表引用稳定」）
+  const extra = useMemo(() => prices
     .map((p, i) => ({ p, color: PRICE_COLORS[i % PRICE_COLORS.length] }))
     .filter(({ p }) => showPrice[p.key] !== false)
-    .map(({ p, color }) => ({ code: p.key, name: p.name, values: p.values, color }));
+    .map(({ p, color }) => ({ code: p.key, name: p.name, values: p.values, color })),
+  [prices, showPrice]);
   // 叠加价格线各占一根左侧 Y 轴（MoneyLinesChart 的 axisBand=46），副图要同步左边距
   const mainGutterLeft = 54 + extra.length * 46;
   const linkGroup = `tape-${data?.date ?? "na"}-${preset}`;
