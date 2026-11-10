@@ -716,6 +716,21 @@ export function Sparkline({ data, up, height = 24, width = 54 }: { data: number[
   );
 }
 
+/** 列表引用稳定化：逐项比对（数组项是对象时比对其各字段的引用），全部未变就返回上一份数组。
+ *  用途：每次渲染都 slice / 默认参数 [] 产生新数组时，避免下游 useMemo（ECharts option）被白白重建。 */
+function useStableList<T extends object>(next: T[]): T[] {
+  const ref = useRef<T[]>(next);
+  const prev = ref.current;
+  const same = prev === next || (prev.length === next.length && next.every((n, i) => {
+    const p = prev[i] as any;
+    if (p === n) return true;
+    const ks = Object.keys(n);
+    return ks.length === Object.keys(p).length && ks.every((k) => (n as any)[k] === p[k]);
+  }));
+  if (!same) ref.current = next;
+  return ref.current;
+}
+
 /** 板块资金多线图：统一时间轴、前值填充后的累计净流入（元 → 亿/万显示）。 */
 const MONEY_COLORS = ["#ef4444", "#f59e0b", "#a855f7", "#3b82f6", "#14b8a6", "#ec4899", "#84cc16", "#f97316"];
 /** 叠加价格线（第二 Y 轴）的配色：与资金线区分开 */
@@ -788,8 +803,12 @@ export function MoneyLinesChart({
   /** 幽灵线（前一交易日）：与主线同色、60% 透明度，不参与标签/悬停 */
   ghost?: { code: string; name: string; values: (number | null)[] }[];
 }) {
-  const shown = (series ?? []).slice(0, maxLines);
-  const extras = extra ?? [];
+  // 引用必须稳定：App 顶栏时钟每秒重渲染整棵树，若每次都 slice / 用默认参数 [] 得到新数组，
+  // option 会跟着重建（formatter 是新闭包，echarts-for-react 深比较判不等）→ 每秒一次
+  // setOption(notMerge)，tooltip DOM 被销毁重建，悬停提示「一闪一闪」。见 AGENTS.md「图表引用稳定」。
+  const shown = useStableList((series ?? []).slice(0, maxLines));
+  const extras = useStableList(extra ?? []);
+  const ghostLines = useStableList(ghost ?? []);
   // 右侧要给「第二根 Y 轴的价格刻度」再留一点，否则会和右侧标签叠在一起
   const axisBand = 46;   // 每条叠加价格轴占的宽度（放左侧，右侧留给标签）
   const gutterRight = endLabels ? LABEL_GUTTER : 12;
@@ -881,7 +900,7 @@ export function MoneyLinesChart({
         lineStyle: { width: s.watch ? lineWidth + 1 : lineWidth, opacity: 1, color },
         data: s.values,
       };
-    }).concat(ghost.map((g, i) => ({
+    }).concat(ghostLines.map((g, i) => ({
       name: g.name,
       type: "line",
       showSymbol: false,
@@ -907,7 +926,9 @@ export function MoneyLinesChart({
       itemStyle: { color: extraColor(s, i) },
       lineStyle: { width: Math.max(1, lineWidth * 0.85), color: extraColor(s, i), opacity: 0.9 },
     }))),
-  }), [axis, shown, vLines, endLabels, extras, gutterRight, gutterLeft, lineWidth, ghost]);
+  }), [axis, shown, vLines, endLabels, extras, gutterRight, gutterLeft, lineWidth, ghostLines]);
+  // 参考线后处理也放进 memo（withGuides 是函数声明会提升；依赖 nowX，每分钟换一次是正常的）
+  const finalOption = useMemo(() => withGuides(option), [option, nowX]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const labels = useMemo<EndLabelItem[]>(() => {
     if (!endLabels) return [];
@@ -944,7 +965,7 @@ export function MoneyLinesChart({
       });
     });
     // 幽灵线（前一日）也出标签：同色、文案后缀「昨」
-    ghost.forEach((g, i) => {
+    ghostLines.forEach((g, i) => {
       let idx = -1;
       for (let k = g.values.length - 1; k >= 0; k--) {
         if (g.values[k] != null) { idx = k; break; }
@@ -961,10 +982,10 @@ export function MoneyLinesChart({
       });
     });
     return out;
-  }, [shown, extras, endLabels, ghost]);
+  }, [shown, extras, endLabels, ghostLines]);
 
   // 参考线：半小时竖虚线（单日）/ 日分隔线（多日）+ y=0 横线
-  const withGuides = (opt: any) => {
+  function withGuides(opt: any) {
     if (!opt.series?.length || !axis?.length) return opt;
     const data: any[] = [];
     if (vLines?.length) {
@@ -982,7 +1003,7 @@ export function MoneyLinesChart({
     data.push({ yAxis: 0, lineStyle: { color: "#9ca3af", type: "solid", width: 1 } });
     opt.series[0].markLine = { symbol: "none", silent: true, label: { show: false }, data };
     return opt;
-  };
+  }
 
   // 容器尺寸变化（窗口缩放 / 高度由视口算出来）时重排画布。
   // 严禁在 render 期间调实例方法（getWidth 会抛 null），只在 effect 里做并判 isDisposed。
@@ -1019,7 +1040,7 @@ export function MoneyLinesChart({
   }, [chart, option]);
 
   if (!axis.length) return null;
-  const labelVersion = `${axis.length}:${shown.map((x) => x.code).join(",")}|${extras.map((x) => x.code).join(",")}|${ghost.map((x) => x.code).join(",")}`;
+  const labelVersion = `${axis.length}:${shown.map((x) => x.code).join(",")}|${extras.map((x) => x.code).join(",")}|${ghostLines.map((x) => x.code).join(",")}`;
   return (
     <div
       className="relative"
@@ -1027,7 +1048,7 @@ export function MoneyLinesChart({
       onMouseEnter={() => { insideRef.current = true; }}
       onMouseLeave={() => { insideRef.current = false; hoverIdxRef.current = null; }}
     >
-      <ReactECharts key={id} option={withGuides(option)} notMerge style={{ height: "100%" }}
+      <ReactECharts key={id} option={finalOption} notMerge style={{ height: "100%" }}
         onChartReady={(c: any) => {
           setChart(c);
           joinGroup(c, linkGroup);

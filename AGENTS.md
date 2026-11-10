@@ -275,6 +275,20 @@ bash web/dev.sh       # 前端开发模式 :5273（/api 代理到 :6799）
   `ReactECharts` 的 `key`（图表 id）变化会销毁旧实例，此时 `chart.getWidth()` 直接抛
   `Cannot read properties of null`，会把整页打进 ErrorBoundary（显示「页面 渲染出错」）。
   像素坐标只能在 effect 里算、先判 `chart.isDisposed()`，结果放 state。
+- **图表引用稳定（2026-11-10，tooltip 每秒闪一次的根因）**：`App.tsx` 顶栏时钟**每秒 `setClock`**，
+  整棵组件树每秒重渲染一次。`echarts-for-react` 用深比较判断 `option` 是否变化，而 option 里的
+  `formatter` 等函数每次都是新闭包 → 只要 option 被重建就判为「变了」→ `setOption(notMerge)`
+  → tooltip DOM 被销毁重建，鼠标悬停时提示框每 1000ms 闪一下。通用规则：
+  1. 传给图表组件的数组/对象 prop **一律 `useMemo`**，禁止在 JSX 里内联 `xs.map(...)`、`[{...}]`、`?? []`；
+  2. 图表组件内部的 `option` 必须 `useMemo`，依赖里只放**引用稳定**的值。对 prop 的 `slice/filter`
+     派生、以及**默认参数 `= []`**（每次渲染都是新数组！）要过一遍 `charts/index.tsx` 的
+     `useStableList()`（逐项比对字段引用，未变就复用上一份，对调用方容错）；
+     对 option 的后处理（如 `withGuides`）放进 memo，不要写在 JSX 里；
+  3. 有意的变化（数据刷新、`nowX` 每分钟前移）重建 option 是正常的，不在此列；悬停高亮走
+     `dispatchAction(highlight)`，不要靠改 state 重建 option。
+     「option 变后补发 `showTip`」只是数据刷新时的兜底，**不能代替引用稳定**——否则仍是每秒销毁再补显。
+  排查手法：Playwright 打开页面、鼠标停在图上，用 `MutationObserver` 记录 `.echarts-for-react`
+  下被移除的节点时间戳——**间隔正好 1000ms** 就是这个问题。新增图表时顺手按此自检。
 - **财联社「热门」（2026-11-06）**：`services/cls_hot.py`。异动取
   `v3/transaction/articles` 里**所有带 `plate_name` 的条目**（每条都是一次板块异动播报，
   不能按标题含「异动」过滤，否则一天只拿到 1~2 条）；热门取

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Drawer, EmptyState, Skeleton } from "@/components/ui/misc";
 import { FlowDetailChart, FlowHistoryChart, MoneyLinesChart } from "@/components/charts";
 import { api } from "@/lib/api";
@@ -39,6 +39,14 @@ export function BoardDetailDrawer({
   const history = d?.history ?? [];
   const stocks = d?.stocks ?? [];
   const heat = d?.report_heat;
+  // 传给 ECharts 的数组必须引用稳定：App 顶栏时钟每秒重渲染整棵树，内联 map/[] 每次都是新数组
+  // → option 重建 → setOption(notMerge) → 悬停 tooltip 每秒闪一次（见 AGENTS.md「图表引用稳定」）
+  const historyDates = useMemo(() => (d?.history ?? []).map((h: any) => h.date), [d]);
+  const historyFlows = useMemo(() => (d?.history ?? []).map((h: any) => h.flow), [d]);
+  const vsSeries = useMemo(() => (vs && d ? [
+    { code: d.code, name: d.name ?? "板块", values: vs.board },
+    { code: "1.000001", name: "上证指数", values: vs.index },
+  ] : []), [d, vs]);
 
   return (
     <Drawer
@@ -98,8 +106,8 @@ export function BoardDetailDrawer({
 
           <Section title="近 20 个交易日资金流" hint={errors.history ?? `覆盖 ${history.length} 个交易日 · 每日取当日分时末端，与上方分时图一致`}>
             {history.length ? (
-              <FlowHistoryChart id={`bh-${d.code}`} dates={history.map((h: any) => h.date)}
-                values={history.map((h: any) => h.flow)} />
+              <FlowHistoryChart id={`bh-${d.code}`} dates={historyDates}
+                values={historyFlows} />
             ) : (
               <EmptyState title="暂无历史数据" hint="库里还没有该板块的每日快照" />
             )}
@@ -108,10 +116,7 @@ export function BoardDetailDrawer({
           <Section title="与上证指数资金走势对比" hint={errors.vs_index ?? vs?.index_day}>
             {vs?.axis?.length ? (
               <MoneyLinesChart id={`bv-${d.code}`} axis={vs.axis} maxLines={2}
-                series={[
-                  { code: d.code, name: d.name ?? "板块", values: vs.board },
-                  { code: "1.000001", name: "上证指数", values: vs.index },
-                ]} height={200} />
+                series={vsSeries} height={200} />
             ) : (
               <EmptyState title="暂无可对比数据" hint={errors.vs_index ?? "指数分时暂无数据"} />
             )}
