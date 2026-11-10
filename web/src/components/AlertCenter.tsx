@@ -13,7 +13,7 @@ import { AlertTriangle, BellRing, Volume2 } from "lucide-react";
 const TYPE_LABEL: Record<string, string> = {
   price_spike: "价格异动", volume_surge: "量能放大", main_inflow: "主力资金",
   divergence: "MACD背离", key_time: "变盘时点", national_team: "国家队护盘",
-  opt_spike: "合约异动", reversal: "变盘开仓",
+  opt_spike: "合约异动", reversal: "变盘开仓", manual_levels: "手动关键位",
 };
 
 /** 合并告警（变盘信号 / 变盘时点）的逐只明细：有分数就带方向+分数 */

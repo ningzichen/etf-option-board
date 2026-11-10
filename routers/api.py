@@ -17,7 +17,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from services import (alerts, board_collector as bcol, boardflow as bf, cls_hot,
                       decision,
                       pinyin as pinyin_svc,
-                      deploy as deploy_svc, em, index_levels, kronos, llm, llm_proxy,
+                      deploy as deploy_svc, em, index_levels,
+                      index_levels_manual as idxm, kronos, llm, llm_proxy,
                       market_service as ms, monitor, option_playbook as playbook,
                       option_service as osvc, push as push_svc, reversal, strategy, tape_flow as tf,
                       user_settings as usv,
@@ -94,13 +95,38 @@ async def indices():
 
 @router.get("/index/levels")
 async def index_levels_view():
-    """上证指数关键位（6 只 ETF 共用一份）+ 分时，供指数弹窗。"""
+    """上证指数关键位（6 只 ETF 共用一份）+ 分时，供指数弹窗。
+
+    `manual` 为用户手动填写的支撑/压力位（按交易日存、顺延生效），
+    已并入 `levels` 与 `total`，与自动位同规则计分。
+    """
     snap, tr = await asyncio.gather(
         index_levels.snapshot(), ms.trends("1.000001"))
     day = (tr[-1].get("time") or "")[:10] if tr else None
     return {**snap, "trends": tr, "trends_day": day,
             "trends_prev_close": (em.trend_prev_close("1.000001")
                                   if day and day != dt.date.today().isoformat() else None)}
+
+
+@router.put("/index/manual-levels")
+async def index_manual_levels_update(payload: dict):
+    """保存上证指数手动支撑/压力位。
+
+    body: {"date": "YYYY-MM-DD", "support": 3900, "pressure": 4000}
+    - `date` 取弹窗正在展示的指数分时交易日（前端传 trends_day；缺省用今天）；
+    - 必须两个都填、100–99999、支撑 < 压力，否则 400 + errors；
+    - 同一天重复保存为覆盖；每个交易日一条，顺延生效。
+    """
+    day = (payload or {}).get("date") or dt.date.today().isoformat()
+    record, errors = idxm.parse_record(payload, day=day)
+    if errors:
+        return JSONResponse({"ok": False, "errors": errors}, status_code=400)
+    if not idxm.save(record):
+        return {"ok": False, "errors": ["写入失败，请稍后重试"]}
+    index_levels.invalidate()
+    snap = await index_levels.snapshot(force=True)
+    return {"ok": True, "manual": snap.get("manual"),
+            "total": snap.get("total"), "levels": snap.get("levels")}
 
 
 @router.get("/etfs")
@@ -1300,7 +1326,11 @@ async def em_flow_targets(date: str | None = Query(None)):
 async def _em_board_list(date: str | None, board_type: str) -> dict:
     """板块（行业/概念）展示列表 + 全量候选（含最新主力净流入与涨跌幅）。
 
-    行业有自定义展示配置（`em_flow_config.json`），概念固定按 |主力净流入| 取前 N。
+    展示顺序（未自定义时）：
+      1) 自定义（`data/board_watch.json`）中属于本口径的板块；
+      2) 「热门」（财联社热门板块）中属于本口径的板块；
+      3) 不足 Top N 时，用当日板块资金排行按 |主力净流入| 从高到低补齐。
+    有自定义配置（配置弹窗里加过）时以配置为准。
     """
     if not date:
         try:
@@ -1314,10 +1344,48 @@ async def _em_board_list(date: str | None, board_type: str) -> dict:
         return {"date": date, "display": [], "all": [], "error": str(exc)}
 
     limit = bf.EM_DEFAULT_CONCEPTS if board_type == "concept" else bf.EM_DEFAULT_INDUSTRIES
-    pick = bf.pick_em_concepts if board_type == "concept" else bf.pick_em_industries
     cfg = await asyncio.to_thread(bf.load_em_config, board_type)
     by = {r["code"]: r for r in rank}
-    base = cfg["items"] if cfg.get("customized") and cfg["items"] else pick(rank)
+
+    if cfg.get("customized") and cfg["items"]:
+        base = cfg["items"]
+    else:
+        # 默认 = 自定义 ∪ 热门，再按 |资金| 补齐到 Top N
+        base: list[dict] = []
+        seen: set[str] = set()
+
+        def add(code: str, name: str = "") -> None:
+            if code in seen or code not in by:
+                return
+            row = by[code]
+            if row.get("type") != board_type:
+                return
+            seen.add(code)
+            base.append({"code": code, "name": name or row.get("name") or code})
+
+        try:
+            watch = await asyncio.to_thread(bf.load_watch)
+        except Exception:  # noqa: BLE001
+            watch = []
+        for w in watch:
+            add(str(w.get("code") or ""), w.get("name") or "")
+
+        try:
+            boards = [{"code": r["code"], "name": r["name"], "kind": r.get("type"),
+                       "flow": r.get("flow"), "pct": r.get("pct"),
+                       "speed": r.get("speed") or 0}
+                      for r in rank if str(r.get("code", "")).startswith("BK")]
+            hot = await cls_hot.hot_boards(boards)
+            for it in hot.get("items") or []:
+                add(str(it.get("code") or ""), it.get("name") or "")
+        except Exception:  # noqa: BLE001 — 热门拉不到不影响默认列表
+            pass
+
+        if len(base) < limit:
+            for r in sorted(rank, key=lambda x: -abs(float(x.get("flow") or 0))):
+                if len(base) >= limit:
+                    break
+                add(r["code"], r.get("name") or "")
 
     def enrich(it: dict) -> dict:
         r = by.get(it["code"]) or {}
@@ -1354,7 +1422,15 @@ async def em_flow_config_add(code: str = Query(...), name: str = Query(""),
     if not code.startswith("BK"):
         return {"error": "板块代码必须是 BK 开头"}
     cfg = await asyncio.to_thread(bf.load_em_config, kind)
-    items = cfg["items"] if cfg.get("customized") else []
+    items = cfg["items"] if (cfg.get("customized") and cfg.get("items")) else []
+    if not items:
+        # 尚未自定义（或刚重置）：以「当前默认展示列表」为起点（自定义 ∪ 热门 ∪ Top N 补齐），
+        # 否则第一次添加会把默认内容整个替换掉，用户会以为「重置后被清空」。
+        try:
+            cur = await _em_board_list(None, kind)
+            items = [{"code": it["code"], "name": it["name"]} for it in cur.get("display") or []]
+        except Exception:  # noqa: BLE001 — 拿不到就用空列表，至少不阻断添加
+            items = []
     if not any(it["code"] == code for it in items):
         items.append({"code": code, "name": name or code})
     if not await asyncio.to_thread(bf.save_em_config, {"customized": True, "items": items}, kind):
@@ -1426,13 +1502,102 @@ async def em_flow_series(target_type: str = Query("index", description="index / 
     for idx, key in ((2, "large"), (3, "medium"), (4, "retail")):
         _, dims[key] = aligned([(p[0], p[idx]) for p in pts])
 
+    # 采集是 1~2 分钟一跳：补成完整分钟轴，半小时刻度才齐全，也才能和成交量副图对齐
+    dense = bf.densify_axis(axis)
+    if dense and dense != axis:
+        for key in list(dims):
+            dims[key] = bf.align_to_axis(
+                [(t, v) for t, v in zip(axis, dims[key]) if v is not None], dense)
+        axis = dense
+
     meta = await asyncio.to_thread(bf.read_em_meta, date, code)
+    # 前一交易日（4 维本地库可用日期里，比当前日期早的最近一天）
+    try:
+        all_dates = await asyncio.to_thread(bf.available_dates, 60, "em")
+    except Exception:  # noqa: BLE001
+        all_dates = []
+    prev_date = next((d for d in sorted(all_dates, reverse=True) if d < date), "")
     out = {"date": date, "code": code, "kind": kind, "axis": axis, "dims": dims,
-           "name": meta.get("name") or code}
+           "name": meta.get("name") or code, "prev_date": prev_date}
     if not axis:
         out["error"] = ("该标的还没有 4 维分时点：自选/热门板块每 2 分钟自动纳入采集，稍后刷新即可；"
                         "概念/行业默认只采 |主力净流入| 前 40")
     return out
+
+
+@router.get("/em-flow/volume")
+async def em_flow_volume(target_type: str = Query("index",
+                                                  description="index / industry / concept / market / hot / custom"),
+                         code: str = Query(...),
+                         date: str | None = Query(None)):
+    """4 维资金页的成交额副图：当日与前一交易日的**累计成交额**。
+
+    数据源：东财 `push2his trends2`（支持板块 secid 90.BKxxxx 与指数），
+    f57 是该分钟的成交额（元），接口内累加成当日总量曲线，并给出两日净额
+    （今日总量 − 昨日总量）。
+    """
+    if not code:
+        return {"axis": [], "today": [], "prev": [], "error": "code 不能为空"}
+    kind = target_type if target_type in ("index", "industry", "concept") else "index"
+    secid = code if not code.startswith("BK") else f"90.{code}"
+    try:
+        d = await em.get_json(
+            "https://push2his.eastmoney.com/api/qt/stock/trends2/get",
+            {"secid": secid,
+             "fields1": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13",
+             "fields2": "f51,f52,f53,f54,f55,f56,f57,f58",
+             "ndays": 5, "iscr": 0, "ut": em._UT},
+            ttl=30.0, tries=2)
+    except Exception as exc:  # noqa: BLE001
+        return {"axis": [], "today": [], "prev": [], "error": str(exc)}
+    trends = ((d or {}).get("data") or {}).get("trends") or []
+    by_day: dict[str, dict[str, float]] = {}
+    for line in trends:
+        parts = str(line).split(",")
+        if len(parts) < 6 or len(parts[0]) < 16:
+            continue
+        ts = parts[0]
+        day, hm = ts[:10], ts[11:16]
+        try:
+            vol = float(parts[6] or 0)   # f57 = 成交额（元）；f56 是成交量（手）
+        except (TypeError, ValueError):
+            vol = 0.0
+        by_day.setdefault(day, {})[hm] = vol
+    if not by_day:
+        return {"axis": [], "today": [], "prev": [], "error": "上游没有分时成交量"}
+
+    days = sorted(by_day)
+    if date and date not in by_day:
+        # 上游只有最近 5 天；历史日期不要拿今天的量冒充
+        return {"date": date, "prev_date": "", "axis": [], "today": [], "prev": [],
+                "error": "该日期超出成交量分时覆盖范围（仅最近 5 个交易日）"}
+    target = date if date in by_day else days[-1]
+    earlier = [d0 for d0 in days if d0 < target]
+    prev_day = earlier[-1] if earlier else ""
+
+    axis = sorted(by_day[target])
+    today = [by_day[target][t] for t in axis]
+    prev_map = by_day.get(prev_day, {}) if prev_day else {}
+    prev = [prev_map.get(t) for t in axis]
+
+    # 副图要的是「当日总量累计曲线」：把每分钟成交量累加，昨日同样累计
+    def cumulative(seq: list) -> list[float]:
+        run = 0.0
+        out: list[float] = []
+        for v in seq:
+            run += float(v or 0)
+            out.append(run)
+        return out
+
+    today_cum = cumulative(today)
+    prev_cum = cumulative(prev)
+    today_total = today_cum[-1] if today_cum else 0.0
+    prev_total = prev_cum[-1] if prev_cum else 0.0
+    return {"date": target, "prev_date": prev_day, "axis": axis,
+            "today": today_cum, "prev": prev_cum, "unit": "元",
+            "today_total": today_total, "prev_total": prev_total,
+            "net_total": today_total - prev_total,
+            "error": None if axis else "该日没有成交额分时"}
 
 
 # --------------------------------------------------------------------------
@@ -1446,6 +1611,54 @@ async def tape_flow_dates(limit: int = Query(60, ge=1, le=365)):
     except Exception:  # noqa: BLE001 — 库未初始化时返回空而不是 500
         dates = []
     return {"dates": dates}
+
+
+@router.get("/tape-flow/turnover")
+async def tape_flow_turnover(date: str | None = Query(None)):
+    """资金流向页的累计成交额对比：当日 vs 前一交易日（全A逐笔直方图求和）。"""
+    try:
+        dates = sorted(await asyncio.to_thread(bf.available_dates, 120, "tape"))
+    except Exception as exc:  # noqa: BLE001
+        return {"axis": [], "today": [], "prev": [], "error": str(exc)}
+    if not dates:
+        return {"axis": [], "today": [], "prev": [], "error": "还没有逐笔数据"}
+    target = date if date in dates else dates[-1]
+    earlier = [d for d in dates if d < target]
+    prev_day = earlier[-1] if earlier else ""
+
+    def day_cum(day: str) -> dict[str, float]:
+        """按分钟汇总「买+卖」成交额（逐笔每笔只记一次）。"""
+        rows = bf.read_tape_bins(day, "amt")
+        per: dict[str, float] = {}
+        for t, _b, buy, sell in rows:
+            per[t] = per.get(t, 0.0) + float(buy or 0) + float(sell or 0)
+        return per
+
+    try:
+        cur = day_cum(target)
+        prev = day_cum(prev_day) if prev_day else {}
+    except Exception as exc:  # noqa: BLE001
+        return {"axis": [], "today": [], "prev": [], "error": str(exc)}
+    axis = sorted(cur)
+    if not axis:
+        return {"date": target, "prev_date": prev_day, "axis": [], "today": [], "prev": [],
+                "error": "该日没有逐笔成交额"}
+
+    def cumulative(per: dict[str, float]) -> list[float]:
+        run = 0.0
+        out: list[float] = []
+        for t in axis:
+            run += per.get(t, 0.0)
+            out.append(run)
+        return out
+
+    today_cum = cumulative(cur)
+    prev_cum = cumulative(prev)
+    return {"date": target, "prev_date": prev_day, "axis": axis,
+            "today": today_cum, "prev": prev_cum,
+            "today_total": today_cum[-1] if today_cum else 0.0,
+            "prev_total": prev_cum[-1] if prev_cum else 0.0,
+            "net_total": (today_cum[-1] if today_cum else 0.0) - (prev_cum[-1] if prev_cum else 0.0)}
 
 
 @router.get("/tape-flow/health")

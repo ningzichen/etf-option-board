@@ -40,7 +40,7 @@ export function dayKey(d = new Date()): string {
 // v3：板块排行新增拼音首字母（py）字段，旧缓存没有该字段会让拼音搜索失效。
 // v4：排行新增涨速（speed）、指数新增涨跌幅（pct），旧缓存会让「涨速」排序失效。
 // v5：ETF 分时轴补成完整分钟（半小时刻度可对齐），旧缓存的稀疏轴会让刻度缺失。
-const CACHE_VER = "v5";
+const CACHE_VER = "v8";
 
 const keyOf = (kind: CacheKind, code: string, extra?: string | number | null) =>
   `${CACHE_VER}|${kind}|${code}|${extra ?? "-"}`;

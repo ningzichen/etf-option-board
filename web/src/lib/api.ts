@@ -11,6 +11,19 @@ export const api = {
   universe: () => get("/universe"),
   indices: () => get("/indices"),
   indexLevels: () => get("/index/levels"),
+  saveIndexManualLevels: async (body: { date: string; support: number; pressure: number }) => {
+    const r = await fetch(`${BASE}/index/manual-levels`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json().catch(() => ({} as any));
+    if (!r.ok || data?.ok === false) {
+      const msg = Array.isArray(data?.errors) ? data.errors.join("；") : "";
+      throw new Error(msg || `保存失败（HTTP ${r.status}）`);
+    }
+    return data;
+  },
   external: () => get("/external"),
   national: () => get("/national"),
   etfs: () => get("/etfs"),
@@ -130,8 +143,10 @@ export const api = {
   emFlowTargets: () => get("/em-flow/targets"),
   emFlowIndustries: () => get("/em-flow/industries"),
   emFlowConcepts: () => get("/em-flow/concepts"),
-  emFlowSeries: (kind: string, code: string) =>
-    get(`/em-flow/series?target_type=${kind}&code=${encodeURIComponent(code)}`),
+  emFlowSeries: (kind: string, code: string, date?: string) =>
+    get(`/em-flow/series?target_type=${kind}&code=${encodeURIComponent(code)}${date ? `&date=${date}` : ""}`),
+  emFlowVolume: (kind: string, code: string, date?: string) =>
+    get(`/em-flow/volume?target_type=${kind}&code=${encodeURIComponent(code)}${date ? `&date=${date}` : ""}`),
   emFlowConfigAdd: async (code: string, name: string, kind = "industry") =>
     (await fetch(`${BASE}/em-flow/config/add?code=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}&kind=${kind}`,
       { method: "POST" })).json(),
@@ -143,6 +158,8 @@ export const api = {
   // 全A逐笔分档（资金流向页）：通达信 / Wind 两套口径
   tapeFlowDates: (limit = 120) => get(`/tape-flow/dates?limit=${limit}`),
   tapeFlowHealth: () => get("/tape-flow/health"),
+  tapeFlowTurnover: (date?: string) =>
+    get(`/tape-flow/turnover${date ? `?date=${date}` : ""}`),
   tapeFlowSeries: (preset: string, date?: string, th?: string) => {
     const qs = [`preset=${preset}`, date ? `date=${date}` : "", th ? `th=${encodeURIComponent(th)}` : ""]
       .filter(Boolean).join("&");

@@ -1,10 +1,23 @@
 import ReactECharts from "echarts-for-react";
+// 仅用于把主图与副图（成交量）连成同一 group，让十字光标/竖线互相穿透
+import * as echarts from "echarts";
 import { Maximize2, Minimize2 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { alignToAxis, minuteOf, sameDayAs, trimSession } from "@/lib/series";
 import { signedFlow } from "@/lib/format";
 import { FlowEndLabels, type EndLabelItem } from "@/components/charts/endLabels";
 import { cn } from "@/lib/utils";
+
+/** 把图表加入同一 ECharts group：同一 group 的实例会同步十字光标/竖线与 tooltip。 */
+export function joinGroup(chart: any, group?: string) {
+  if (!chart || !group || chart.isDisposed?.()) return;
+  try {
+    chart.group = group;
+    echarts.connect(group);
+  } catch {
+    /* 连接失败不影响图表本身 */
+  }
+}
 
 const AXIS = "#71717a";
 const SPLIT = "rgba(0,0,0,0.07)";
@@ -752,7 +765,7 @@ function NowMarker({
 
 export function MoneyLinesChart({
   id, axis, series, height = 320, maxLines = 8, vLines, endLabels = false,
-  extra = [], lineWidth = 1.4, nowX,
+  extra = [], lineWidth = 1.4, nowX, linkGroup, ghost = [],
 }: {
   id: string;
   axis: string[];
@@ -770,6 +783,10 @@ export function MoneyLinesChart({
   /** 当前时间位置（形如 "14:12"，必须是 axis 里的刻度）：画一条实线 + 顶部时间标签。
    *  传 null/undefined 不画；只在「当天 + 盘中」由调用方传入，历史/休市不显示。 */
   nowX?: string | null;
+  /** 与副图共享同一 group：十字光标/竖线会同步到同组图表 */
+  linkGroup?: string;
+  /** 幽灵线（前一交易日）：与主线同色、60% 透明度，不参与标签/悬停 */
+  ghost?: { code: string; name: string; values: (number | null)[] }[];
 }) {
   const shown = (series ?? []).slice(0, maxLines);
   const extras = extra ?? [];
@@ -779,8 +796,11 @@ export function MoneyLinesChart({
   const gutterLeft = 54 + extras.length * axisBand;
   const extraColor = (s: { color?: string }, i: number) => s.color ?? EXTRA_COLORS[i % EXTRA_COLORS.length];
   const [chart, setChart] = useState<any>(null);
-  // 悬停右侧标签 → 对应分时线加粗并变红/绿，其余淡出（与主力资金分时一致）
-  const [hoverCode, setHoverCode] = useState<string | null>(null);
+
+  // 轮询/刷新会 setOption(notMerge)，ECharts 会顺带清掉十字光标与 tooltip；
+  // 记住「鼠标在图上、停在第几个点」，每次 option 更新后补发一次 showTip。
+  const hoverIdxRef = useRef<number | null>(null);
+  const insideRef = useRef(false);
   const option = useMemo(() => ({
     animation: false,
     color: MONEY_COLORS,
@@ -815,7 +835,9 @@ export function MoneyLinesChart({
       axisLine: { show: false },
       axisTick: { show: false },
       axisLabel: {
-        color: AXIS, fontSize: 10, hideOverlap: true,
+        color: AXIS, fontSize: 10, hideOverlap: false,
+        // 显式指定哪些刻度要显示：ECharts 的 auto 抽稀会只留 2~3 个（09:30/11:00）
+        interval: vLines?.length ? 0 : (_i: number, v: string) => isHalfHour(v),
         // 多日模式：底部只按「日」显示（MM-DD）；单日模式：每半小时（09:30/10:00/10:30…）
         formatter: vLines?.length
           ? (v: string) => (vLines.includes(v) ? v.slice(0, 5) : "")
@@ -844,26 +866,36 @@ export function MoneyLinesChart({
         axisLabel: { color: AXIS, fontSize: 10, formatter: (v: number) => signedFlow(v) },
         splitLine: { lineStyle: { color: "rgba(255,255,255,0.06)" } },
       },
-    series: shown.map((s, i) => {
-      const focus = hoverCode === s.code;
-      const dim = !!hoverCode && !focus;
-      let last: number | null = null;
-      for (let k = s.values.length - 1; k >= 0; k--) {
-        if (s.values[k] != null) { last = s.values[k] as number; break; }
-      }
-      const color = focus ? ((last ?? 0) >= 0 ? "#ef4444" : "#22c55e")
-        : MONEY_COLORS[i % MONEY_COLORS.length];
+    series: shown.map((s, i): any => {
+      const color = MONEY_COLORS[i % MONEY_COLORS.length];
       return {
         name: s.name,
         type: "line",
         showSymbol: false,
         smooth: false,
         connectNulls: false,
-        z: focus ? 5 : 2,
-        lineStyle: { width: focus ? lineWidth + 1.8 : s.watch ? lineWidth + 1 : lineWidth, opacity: dim ? 0.18 : 1, color },
+        z: 2,
+        // 悬停高亮改用 dispatchAction(highlight) 的 emphasis/blur，不再重建 option
+        emphasis: { focus: "series" as const, lineStyle: { width: lineWidth + 1.8 } },
+        blur: { lineStyle: { opacity: 0.18 }, label: { opacity: 0.2 } },
+        lineStyle: { width: s.watch ? lineWidth + 1 : lineWidth, opacity: 1, color },
         data: s.values,
       };
-    }).concat(extras.map((s, i) => ({
+    }).concat(ghost.map((g, i) => ({
+      name: g.name,
+      type: "line",
+      showSymbol: false,
+      smooth: false,
+      connectNulls: false,
+      silent: true,
+      z: 1,
+      lineStyle: {
+        width: Math.max(1, lineWidth - 0.3),
+        opacity: 0.5,
+        color: MONEY_COLORS[i % MONEY_COLORS.length],
+      },
+      data: g.values,
+    }))).concat(extras.map((s, i) => ({
       name: s.name,
       type: "line",
       yAxisIndex: i + 1,
@@ -875,7 +907,7 @@ export function MoneyLinesChart({
       itemStyle: { color: extraColor(s, i) },
       lineStyle: { width: Math.max(1, lineWidth * 0.85), color: extraColor(s, i), opacity: 0.9 },
     }))),
-  }), [axis, shown, vLines, endLabels, hoverCode, extras, gutterRight, gutterLeft, lineWidth]);
+  }), [axis, shown, vLines, endLabels, extras, gutterRight, gutterLeft, lineWidth, ghost]);
 
   const labels = useMemo<EndLabelItem[]>(() => {
     if (!endLabels) return [];
@@ -909,11 +941,27 @@ export function MoneyLinesChart({
         color: MONEY_COLORS[i % MONEY_COLORS.length],
         coord: [idx, v],
         weight: Math.abs(v),
-        active: hoverCode === s.code,
+      });
+    });
+    // 幽灵线（前一日）也出标签：同色、文案后缀「昨」
+    ghost.forEach((g, i) => {
+      let idx = -1;
+      for (let k = g.values.length - 1; k >= 0; k--) {
+        if (g.values[k] != null) { idx = k; break; }
+      }
+      if (idx < 0) return;
+      const v = g.values[idx] as number;
+      out.push({
+        id: `ghost-${g.code}`,
+        text: `${g.name} ${signedFlow(v)}`,
+        color: MONEY_COLORS[i % MONEY_COLORS.length],
+        coord: [idx, v],
+        weight: Math.abs(v) * 0.9,
+        dashed: true,
       });
     });
     return out;
-  }, [shown, extras, endLabels, hoverCode]);
+  }, [shown, extras, endLabels, ghost]);
 
   // 参考线：半小时竖虚线（单日）/ 日分隔线（多日）+ y=0 横线
   const withGuides = (opt: any) => {
@@ -950,19 +998,77 @@ export function MoneyLinesChart({
     return () => window.removeEventListener("resize", onResize);
   }, [chart]);
 
+  // 只在「option 真的换了」（数据刷新）时补发一次 tooltip；
+  // 悬停导致的普通重渲染绝不能补发，否则 showTip 反复触发 → 十字线/标签闪烁。
+  const lastOptionRef = useRef<any>(null);
+  useEffect(() => {
+    if (!chart || chart.isDisposed?.()) return;
+    if (lastOptionRef.current === option) return;
+    lastOptionRef.current = option;
+    if (!insideRef.current || hoverIdxRef.current == null) return;
+    const timers = [60, 700].map((delay) => setTimeout(() => {
+      try {
+        if (!chart.isDisposed?.() && insideRef.current && hoverIdxRef.current != null) {
+          chart.dispatchAction({ type: "showTip", seriesIndex: 0, dataIndex: hoverIdxRef.current });
+        }
+      } catch {
+        /* 忽略：图表可能刚被销毁 */
+      }
+    }, delay));
+    return () => timers.forEach(clearTimeout);
+  }, [chart, option]);
+
   if (!axis.length) return null;
-  const labelVersion = `${axis.length}:${shown.map((x) => x.code).join(",")}|${extras.map((x) => x.code).join(",")}`;
+  const labelVersion = `${axis.length}:${shown.map((x) => x.code).join(",")}|${extras.map((x) => x.code).join(",")}|${ghost.map((x) => x.code).join(",")}`;
   return (
-    <div className="relative" style={{ height }}>
+    <div
+      className="relative"
+      style={{ height }}
+      onMouseEnter={() => { insideRef.current = true; }}
+      onMouseLeave={() => { insideRef.current = false; hoverIdxRef.current = null; }}
+    >
       <ReactECharts key={id} option={withGuides(option)} notMerge style={{ height: "100%" }}
-        onChartReady={setChart} />
+        onChartReady={(c: any) => {
+          setChart(c);
+          joinGroup(c, linkGroup);
+          // 记录悬停位置：axis 值 → 索引；鼠标移出图表则清空
+          c.on("updateAxisPointer", (e: any) => {
+            const v = e?.axesInfo?.[0]?.value;
+            if (v == null) return;
+            const i = axis.indexOf(String(v));
+            if (i >= 0) hoverIdxRef.current = i;
+          });
+          c.getZr().on("mousemove", (e: any) => {
+            insideRef.current = true;
+            // 直接把像素位置换算成「第几个刻度」：比 updateAxisPointer 的 value 更可靠
+            try {
+              const pt = c.convertFromPixel({ gridIndex: 0 }, [e.offsetX, e.offsetY]);
+              if (pt && isFinite(pt[0])) {
+                hoverIdxRef.current = Math.max(0, Math.min(axis.length - 1, Math.round(pt[0])));
+              }
+            } catch {
+              /* 忽略 */
+            }
+          });
+        }} />
       {nowX && axis.includes(nowX) ? (
         <NowMarker chart={chart} index={axis.indexOf(nowX)} label={nowX} gridTop={10} />
       ) : null}
       {endLabels && (
         <FlowEndLabels chart={chart} items={labels} version={labelVersion}
           gridTop={10} gridRight={gutterRight} gridBottom={22}
-          onHover={setHoverCode} />
+          onHover={(code) => {
+            if (!chart || chart.isDisposed?.()) return;
+            try {
+              chart.dispatchAction({ type: "downplay" });
+              if (code) {
+                const idx = shown.findIndex((x) => x.code === code);
+                if (idx >= 0) chart.dispatchAction({ type: "highlight", seriesIndex: idx });
+              }
+            } catch {
+              /* 实例可能刚被销毁 */
+            }
+          }} />
       )}
     </div>
   );
@@ -1370,5 +1476,113 @@ export function BoardFlowChart({
         onHover={onHoverCode}
       />
     </div>
+  );
+}
+
+/** 成交量对比副图：当日 vs 前一交易日的每分钟成交量（万手）。 */
+export function VolumeCompareChart({
+  id, axis, today, prev, height = 150, prevDate, date, linkGroup, gutterLeft = 54,
+}: {
+  id: string;
+  axis: string[];
+  today: (number | null)[];
+  prev: (number | null)[];
+  height?: number | string;
+  date?: string;
+  prevDate?: string;
+  /** 与主图共享同一 group：十字光标/竖线会同步 */
+  linkGroup?: string;
+  /** 左边距：主图叠加价格轴后会变宽，副图要跟着对齐 */
+  gutterLeft?: number;
+}) {
+  // 成交额（元）→ 亿元，保留两位
+  const toYi = (v: number | null) => (v == null ? null : Math.round((v / 1e8) * 100) / 100);
+  const option = useMemo(() => ({
+    animation: false,
+    grid: { left: gutterLeft, right: LABEL_GUTTER, top: 6, bottom: 20 },
+    tooltip: {
+      trigger: "axis",
+      axisPointer: { type: "cross" },
+      backgroundColor: "rgba(24,24,27,0.95)",
+      borderColor: "rgba(255,255,255,0.12)",
+      textStyle: { color: "#e4e4e7", fontSize: 11 },
+      formatter: (ps: any[]) => {
+        if (!ps?.length) return "";
+        const idx = ps[0].dataIndex ?? 0;
+        const t = today[idx] ?? 0;
+        const y = prev[idx] ?? 0;
+        const net = t - y;
+        const netTxt = `${net >= 0 ? "+" : "-"}${Math.abs(net / 1e8).toFixed(2)}亿`;
+        const netColor = net >= 0 ? "#f87171" : "#4ade80";
+        const rows = ps.map((p) =>
+          `<div style="display:flex;justify-content:space-between;gap:14px">
+             <span>${p.marker}${p.seriesName}</span>
+             <span>${p.value == null ? "—" : `${p.value} 亿`}</span>
+           </div>`).join("");
+        return `<div style="margin-bottom:4px;display:flex;justify-content:space-between;gap:16px">
+            <span>${ps[0].axisValue}</span>
+            <span>两日净额 <b style="color:${netColor}">${netTxt}</b></span>
+          </div>${rows}`;
+      },
+    },
+    legend: { show: false },
+    xAxis: {
+      type: "category",
+      data: axis,
+      boundaryGap: false,
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: {
+        color: "#71717a", fontSize: 9, hideOverlap: true,
+        formatter: (v: string) => (isHalfHour(v) ? v : ""),
+      },
+    },
+    yAxis: {
+      type: "value",
+      scale: true,
+      name: "亿元",
+      nameTextStyle: { color: "#71717a", fontSize: 9 },
+      axisLabel: { color: "#71717a", fontSize: 9 },
+      splitLine: { lineStyle: { color: "rgba(255,255,255,0.06)", type: "dashed" } },
+    },
+    series: [
+      {
+        name: `今日 ${date ?? ""}`.trim(),
+        type: "line",
+        data: today.map(toYi),
+        showSymbol: false,
+        lineStyle: { width: 1.4, color: "#3b82f6" },
+        itemStyle: { color: "#3b82f6" },
+        z: 3,
+      },
+      {
+        name: `昨日 ${prevDate ?? ""}`.trim(),
+        type: "line",
+        data: prev.map(toYi),
+        showSymbol: false,
+        lineStyle: { width: 1.2, color: "#9ca3af", type: "dashed" },
+        itemStyle: { color: "#9ca3af" },
+        z: 2,
+        markLine: {
+          symbol: "none",
+          silent: true,
+          label: { show: false },
+          data: axis.filter((t) => isHalfHour(t)).map((t) => ({
+            xAxis: t, lineStyle: { color: "#6b7280", type: [4, 4], width: 1 },
+          })),
+        },
+      },
+    ],
+  }), [axis, today, prev, date, prevDate, gutterLeft]);
+
+  const chartRef = useRef<any>(null);
+  useEffect(() => {
+    joinGroup(chartRef.current, linkGroup);
+  }, [linkGroup]);
+
+  if (!axis.length) return null;
+  return (
+    <ReactECharts key={id} option={option} notMerge style={{ height }}
+      onChartReady={(c: any) => { chartRef.current = c; joinGroup(c, linkGroup); }} />
   );
 }

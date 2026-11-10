@@ -1,8 +1,8 @@
 import ReactECharts from "echarts-for-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { Dialog } from "@/components/ui/misc";
 import { api } from "@/lib/api";
-import { clsUpDown, nf, pct } from "@/lib/format";
+import { clsUpDown, nf, pct, todayStr } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const COLORS: Record<string, string> = {
@@ -12,7 +12,14 @@ const COLORS: Record<string, string> = {
   int_upper: "#f87171",
   ma5: "#f59e0b",
   ma11: "#a855f7",
+  // 手动位：图上只画这两条（其余自动位仍算分、仍进下方表格）
+  manual_support: "#059669",
+  manual_pressure: "#be123c",
 };
+
+/** 图上只显示手动支撑/压力线；20 日高低、整百、MA 留在因子表里 */
+const isManual = (key: string) => key.startsWith("manual_");
+
 
 type Level = { key: string; name: string; value: number; side: string; dist_pct: number | null; contrib: number };
 
@@ -23,6 +30,16 @@ export function IndexLevelsDialog({ open, onClose }: { open: boolean; onClose: (
   const [err, setErr] = useState<string | null>(null);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
+  // 手动支撑/压力位输入：默认回填当前生效值；用户改过之后 10s 轮询不再覆盖
+  const [sup, setSup] = useState("");
+  const [pre, setPre] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+  const dirtyRef = useRef(false);
+  dirtyRef.current = dirty;
+
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
 
@@ -32,7 +49,12 @@ export function IndexLevelsDialog({ open, onClose }: { open: boolean; onClose: (
     const load = async () => {
       try {
         const d = await api.indexLevels();
-        if (alive) { setData(d); setErr(d?.error ?? null); }
+        if (!alive) return;
+        setData(d); setErr(d?.error ?? null);
+        if (!dirtyRef.current) {
+          setSup(d?.manual?.support != null ? String(d.manual.support) : "");
+          setPre(d?.manual?.pressure != null ? String(d.manual.pressure) : "");
+        }
       } catch (e: any) {
         if (alive) setErr(e?.message ?? "加载失败");
       }
@@ -45,13 +67,44 @@ export function IndexLevelsDialog({ open, onClose }: { open: boolean; onClose: (
   }, [open]);
 
   const levels: Level[] = data?.levels ?? [];
+  const manualLevels = useMemo(
+    () => (data?.levels ?? []).filter((l: Level) => isManual(l.key)),
+    [data?.levels],
+  );
+
+  const edit = (setter: (v: string) => void) => (e: ChangeEvent<HTMLInputElement>) => {
+    setter(e.target.value);
+    setDirty(true);
+    setSaveErr(null);
+  };
+
+  const saveManual = async () => {
+    const s = Number(sup), p = Number(pre);
+    if (!sup.trim() || !pre.trim()) { setSaveErr("支撑位和压力位都必须填写"); return; }
+    if (!Number.isFinite(s) || !Number.isFinite(p)) { setSaveErr("请填写有效数字"); return; }
+    if (s < 100 || s > 99999 || p < 100 || p > 99999) { setSaveErr("点位需在 100–99999 之间"); return; }
+    if (s >= p) { setSaveErr("支撑位必须小于压力位"); return; }
+    setSaving(true);
+    try {
+      const day = data?.trends_day || todayStr();
+      const res = await api.saveIndexManualLevels({ date: day, support: s, pressure: p });
+      setDirty(false);
+      setData((prev: any) => ({ ...(prev ?? {}), manual: res.manual, total: res.total, levels: res.levels }));
+      setSavedAt(res.manual?.date ?? day);
+    } catch (e: any) {
+      setSaveErr(e?.message ?? "保存失败");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const option = useMemo(() => {
     const tr = data?.trends ?? [];
     const times = tr.map((p: any) => (p.time ?? "").slice(11, 16));
     const price = tr.map((p: any) => p.price);
     const avg = tr.map((p: any) => (p.avg ? p.avg : null));
-    const active = levels.filter((l) => !hidden.has(l.key));
+    // 图上只画手动支撑/压力线：自动位（20日高低/整百/MA）仍算分、仍进下方表格
+    const active = manualLevels.filter((l) => !hidden.has(l.key));
     const vals = [...price, ...avg].filter((v: any) => typeof v === "number" && Number.isFinite(v));
     const span = [...vals, ...active.map((l) => l.value)];
     const lo = span.length ? Math.min(...span) : 0;
@@ -104,7 +157,7 @@ export function IndexLevelsDialog({ open, onClose }: { open: boolean; onClose: (
         },
       ],
     };
-  }, [data, levels, hidden]);
+  }, [data, manualLevels, hidden]);
 
   const toggle = (key: string) => {
     setHidden((prev) => {
@@ -124,10 +177,47 @@ export function IndexLevelsDialog({ open, onClose }: { open: boolean; onClose: (
         {data?.note && <span className="text-[11px] text-amber-600">{data.note}</span>}
       </div>
 
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-border/70 bg-muted/30 px-2.5 py-2">
+        <span className="text-[11px] font-medium text-muted-foreground">手动关键位</span>
+        <label className="flex items-center gap-1 text-[11px]">
+          <span className="text-muted-foreground">支撑位</span>
+          <input
+            type="text" inputMode="decimal" value={sup} placeholder="如 3900"
+            onChange={edit(setSup)} onKeyDown={(e) => { if (e.key === "Enter") saveManual(); }}
+            className="h-7 w-24 rounded-md border border-border bg-background px-2 text-right text-xs tnum outline-none focus:border-ring"
+          />
+        </label>
+        <label className="flex items-center gap-1 text-[11px]">
+          <span className="text-muted-foreground">压力位</span>
+          <input
+            type="text" inputMode="decimal" value={pre} placeholder="如 4000"
+            onChange={edit(setPre)} onKeyDown={(e) => { if (e.key === "Enter") saveManual(); }}
+            className="h-7 w-24 rounded-md border border-border bg-background px-2 text-right text-xs tnum outline-none focus:border-ring"
+          />
+        </label>
+        <button
+          type="button" onClick={saveManual} disabled={saving}
+          className={cn(
+            "h-7 rounded-md border px-2.5 text-[11px] transition-colors",
+            saving ? "cursor-not-allowed border-border text-muted-foreground"
+                   : "border-emerald-600/50 bg-emerald-600/10 text-emerald-700 hover:bg-emerald-600/20",
+          )}
+        >
+          {saving ? "保存中…" : "保存"}
+        </button>
+        <span className="text-[11px] text-muted-foreground">
+          {data?.manual
+            ? `${data.manual.carried ? `沿用于 ${data.manual.date}` : `${data.manual.date} 今日设`} · 参与评分`
+            : "未设置 · 保存后显示在图上"}
+          {savedAt && <span className="ml-1 text-emerald-600">已保存</span>}
+        </span>
+      </div>
+      {saveErr && <div className="mt-1 text-[11px] text-destructive">{saveErr}</div>}
+
       {err && <div className="mt-2 text-xs text-destructive">{String(err)}</div>}
 
       <div className="mt-2 flex flex-wrap gap-1.5">
-        {levels.map((l) => {
+        {manualLevels.map((l) => {
           const off = hidden.has(l.key);
           return (
             <button
@@ -145,6 +235,9 @@ export function IndexLevelsDialog({ open, onClose }: { open: boolean; onClose: (
             </button>
           );
         })}
+        {!manualLevels.length && (
+          <span className="text-[11px] text-muted-foreground">图上只画手动支撑/压力线；20 日高低、整百、MA 见下表</span>
+        )}
       </div>
 
       <div className="mt-2 h-[260px] w-full sm:h-[300px]">

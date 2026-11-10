@@ -5,7 +5,7 @@ import { Frame, FramePanel, FrameHeader, FrameTitle } from "@/components/reui/fr
 import { Badge } from "@/components/reui/badge";
 import { Tabs } from "@/components/ui/misc";
 import { DayTag } from "@/components/DayTag";
-import { MoneyLinesChart } from "@/components/charts";
+import { MoneyLinesChart, VolumeCompareChart } from "@/components/charts";
 import { api } from "@/lib/api";
 import { usePolling } from "@/lib/usePolling";
 import { dateWithWeek, flowMoney, signedFlow, todayStr } from "@/lib/format";
@@ -94,6 +94,13 @@ export function TapeFlowPage() {
     () => api.tapeFlowSeries(preset, date || undefined, applied || undefined),
     60_000, [preset, date, applied]);
 
+  // 累计成交额（全部A股 = 东方财富全A 47.800000）当日 vs 前一交易日，与四维资金页同一个副图
+  const { data: turnover } = usePolling(
+    () => api.emFlowVolume("market", "47.800000", date || undefined),
+    120_000,
+    [date],
+    { kind: "ctx", code: `tape-turnover:${date || "latest"}` });
+
   // 服务端只给「相对秒数」，本地逐秒递减 + 每次 health 轮询重新校准（避免两端时钟差）
   const [nowTs, setNowTs] = useState(() => Date.now());
   useEffect(() => {
@@ -145,6 +152,9 @@ export function TapeFlowPage() {
     .map((p, i) => ({ p, color: PRICE_COLORS[i % PRICE_COLORS.length] }))
     .filter(({ p }) => showPrice[p.key] !== false)
     .map(({ p, color }) => ({ code: p.key, name: p.name, values: p.values, color }));
+  // 叠加价格线各占一根左侧 Y 轴（MoneyLinesChart 的 axisBand=46），副图要同步左边距
+  const mainGutterLeft = 54 + extra.length * 46;
+  const linkGroup = `tape-${data?.date ?? "na"}-${preset}`;
   const meta = data?.meta ?? {};
   const updated = meta.updated_at || health?.state?.last_run || "";
   const err = data?.error;
@@ -364,18 +374,54 @@ export function TapeFlowPage() {
             ) : null}
           </div>
 
-          {/* 分时图：独占剩余高度，随窗口缩放重排 */}
-          <div className="min-h-0 flex-1 px-2 pb-1">
-            <MoneyLinesChart
-              id={`tape-flow-${preset}`}
-              axis={data?.axis ?? []}
-              series={series}
-              extra={extra}
-              lineWidth={2}
-              height="100%"
-              endLabels
-              nowX={liveNow ? nowLabel : null}
-            />
+          {/* 分时图 + 累计成交额副图：主图占上，副图固定高度 */}
+          <div className="flex min-h-0 flex-1 flex-col px-2 pb-1">
+            <div className="min-h-0 flex-[3]">
+              <MoneyLinesChart
+                id={`tape-flow-${preset}`}
+                axis={data?.axis ?? []}
+                series={series}
+                extra={extra}
+                lineWidth={2}
+                height="100%"
+                endLabels
+                nowX={liveNow ? nowLabel : null}
+                linkGroup={linkGroup}
+              />
+            </div>
+            <div className="mt-1 shrink-0 border-t border-border/40 pt-1">
+              <div className="flex items-center gap-3 px-1 pb-0.5 text-[10px] text-muted-foreground">
+                <span className="font-medium">累计成交额（全部A股）</span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block h-0.5 w-3 rounded bg-[#3b82f6]" />今日 {turnover?.date ?? data?.date ?? ""}
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block h-0.5 w-3 border-t border-dashed border-[#9ca3af]" />昨日 {turnover?.prev_date ?? "—"}
+                </span>
+                {typeof turnover?.net_total === "number" && (
+                  <span className="inline-flex items-center gap-1">
+                    两日净额
+                    <span className={cn("tnum font-medium", turnover.net_total >= 0 ? "text-up" : "text-down")}>
+                      {signedFlow(turnover.net_total)}
+                    </span>
+                  </span>
+                )}
+                {!turnover?.axis?.length && <span>（暂无成交额分时）</span>}
+              </div>
+              <div className="h-[140px]">
+                <VolumeCompareChart
+                  id={`tape-turnover-${turnover?.date ?? "na"}`}
+                  axis={turnover?.axis ?? []}
+                  today={turnover?.today ?? []}
+                  prev={turnover?.prev ?? []}
+                  date={turnover?.date}
+                  prevDate={turnover?.prev_date}
+                  height="100%"
+                  linkGroup={linkGroup}
+                  gutterLeft={mainGutterLeft}
+                />
+              </div>
+            </div>
           </div>
 
           <div className="shrink-0 space-y-0.5 px-2 pb-1 pt-0.5 text-[10px] leading-snug text-muted-foreground">
