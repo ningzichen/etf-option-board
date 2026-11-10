@@ -7,9 +7,10 @@ import datetime as dt
 import logging
 import time
 
-from services import (decision, em, index_levels, kronos, market_service as ms, market_turnover,
-                      money as money_fmt, option_service as osvc, pick_tracker as tracker,
-                      user_settings as usv, vol)
+from services import (decision, em, index_levels, kronos, market_service as ms,
+                      market_turnover, money as money_fmt, option_service as osvc,
+                      pick_tracker as tracker, user_settings as usv,
+                      volume_ratio, vol)
 from services.indicators import atr, macd_state, pct_change, support_resistance, volume_stats
 from services.direction_score import index_bias, recent_change, score_result
 from services.universe import ETF_BY_CODE, ETFS, TRACK_INDEX
@@ -107,8 +108,14 @@ async def _compute_dirs() -> dict:
                     ms.etf_context(etf["code"], etf["secid"]),
                     ms.track_index_state(etf["track"]),
                 )
+                # 当前指数量能：关联指数的同时间点累计成交额同比（同一指数 30s 缓存）
+                track_secid = TRACK_INDEX.get(etf["track"])
+                index_vol = (await volume_ratio.index_ratio(
+                    track_secid, (track.get("quote") or {}).get("pct"),
+                    label=etf["track"]) if track_secid else None)
                 from services import reversal
                 b = bias_score(ctx, track, national, ext, None, idx_lv, turnover,
+                               index_vol,
                                reversal_signal=reversal.factor(etf["code"]))
                 return etf["code"], b
             except Exception as exc:  # noqa: BLE001
@@ -259,7 +266,8 @@ def detect_signals(etf_ctx: dict, track: dict, national: dict, ext: list[dict],
 
 
 def bias_score(etf_ctx, track, national, ext, kronos_sum, idx_levels=None,
-               turnover=None, *, reversal_signal=(0.0, None)) -> dict:
+               turnover=None, index_volume=None, *,
+               reversal_signal=(0.0, None)) -> dict:
     """多因子方向评分（纯函数），原始分数 ≥15 看多、≤-15 看空。
 
     含「变盘点」加分（reversal.factor，±15，60 分钟衰减）：5m/15m 高周期转折点作为
@@ -316,11 +324,16 @@ def bias_score(etf_ctx, track, national, ext, kronos_sum, idx_levels=None,
     if ext_score:
         v = max(-10.0, min(10.0, ext_score))
         score += v; detail["外围市场"] = round(v, 1)
-    # 市场总成交额（两市成交额折算全天 vs 前一日，量价配合 ±10）
+    # 市场总成交额（全A 同时间点累计同比，放量顺势 / 缩量背离，±10）
     tv = (turnover or {}).get("factor") or 0
     if tv:
         score += tv
         detail["市场总成交额"] = round(tv, 1)
+    # 当前指数量能（关联指数同时间点累计同比，±8，同一套量价配合口径）
+    iv = (index_volume or {}).get("factor") or 0
+    if iv:
+        score += iv
+        detail["指数量能"] = round(iv, 1)
     # 变盘点（5m/15m 高周期转折，权重 15）：当日已确认转折点并入方向合力，60 分钟内衰减。
     # 这是「变盘时间点作为条件参与趋势方向分析」的落点——不再单独刷屏，而是加权到方向结论。
     rev_v, rev_label = reversal_signal
@@ -551,6 +564,11 @@ async def analyze(etf_code: str, with_kronos: bool = True, klt: int = 1) -> dict
     signals = detect_signals(etf_ctx, track, national, ext, kronos_sum, idx_lv, turnover)
     # 方向与列表/T 型报价共用快照；Kronos 仍在独立预测和信号区展示。
     bias = await direction_for(etf_code)
+    # 当前指数量能明细（关联指数同时间点同比；与方向快照同一份 30s 缓存）
+    track_secid = TRACK_INDEX.get(etf["track"])
+    index_vol = (await volume_ratio.index_ratio(
+        track_secid, (track.get("quote") or {}).get("pct"),
+        label=etf["track"]) if track_secid else None)
     plan_dir = bias["direction"] if bias["direction"] != "neutral" else (
         "call" if bias["score"] >= 0 else "put")
     levels = plan_levels(etf_ctx, plan_dir)
@@ -686,6 +704,7 @@ async def analyze(etf_code: str, with_kronos: bool = True, klt: int = 1) -> dict
         "track": {"quote": track.get("quote"), "support": track.get("support"), "macd": track.get("macd")},
         "index_levels": idx_lv,
         "market_turnover": turnover,
+        "index_volume": index_vol,
         "national_team": national,
         "external": ext,
         "volume": etf_ctx.get("volume"),

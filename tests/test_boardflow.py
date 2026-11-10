@@ -465,3 +465,21 @@ class TestSpeed5:
         rows = b.latest_em_flows(self.date)
         # 5 分钟前（09:35）0.2 → 最新 0.9 = +0.7
         assert rows[0]["speed"] == pytest.approx(0.7)
+
+
+class TestDensifySeries:
+    def test_sparse_axis_is_filled_forward(self):
+        axis = ["09:30", "09:32", "09:34"]
+        values = [1.0, 3.0, None]
+        dense_axis, dense_vals = bf.densify_series(axis, values)
+        assert dense_axis == ["09:30", "09:31", "09:32", "09:33", "09:34"]
+        # 缺失分钟沿用前值；末尾未采到的点也沿用最后已知值
+        assert dense_vals == [1.0, 1.0, 3.0, 3.0, 3.0]
+
+    def test_dense_axis_is_unchanged(self):
+        axis = ["09:30", "09:31", "09:32"]
+        values = [1.0, 2.0, 3.0]
+        assert bf.densify_series(axis, values) == (axis, values)
+
+    def test_empty(self):
+        assert bf.densify_series([], []) == ([], [])

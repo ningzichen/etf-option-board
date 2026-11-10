@@ -48,7 +48,8 @@ function dispatch(a: Alert) {
   // 系统通知可能被 macOS 专注模式 / 系统通知设置静默丢弃（Chrome 里显示已授权但桌面不弹），
   // 所以页面内 toast 永远兜底显示，不再以「通知是否发出」作为唯一提示。
   if (!a.backfill && a.level !== "info") {
-    sound.play(a.level);
+    // silent=true：只弹通知与 toast，不响铃（手动关键位提醒每 10 分钟一次，响铃会烦）
+    if (!a.silent) sound.play(a.level);
     showNotification(a);
     toast(a.title, { description: a.text, duration: 6000 });
   }
