@@ -18,10 +18,11 @@ import json
 import logging
 import os
 
+from paths import data_path
+
 log = logging.getLogger("picks")
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PATH = os.path.join(_ROOT, "data", "pick_history.json")
+_PATH = data_path("pick_history.json")
 
 MAX_RECORDS = 6000          # 约 30 个交易日（12 个标的 × 每 15 分钟一条）
 HORIZONS = (5, 15, 30)      # 分钟

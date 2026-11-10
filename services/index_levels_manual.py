@@ -21,10 +21,11 @@ import json
 import logging
 import os
 
+from paths import data_dir, data_path
+
 log = logging.getLogger("index_levels")
 
-_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
-_PATH = os.path.join(_DATA_DIR, "index_levels_manual.json")
+_PATH = data_path("index_levels_manual.json")
 
 MIN_VALUE = 100.0
 MAX_VALUE = 99999.0
@@ -140,7 +141,7 @@ def save(record: dict) -> bool:
     }
     tmp = _PATH + ".tmp"
     try:
-        os.makedirs(_DATA_DIR, exist_ok=True)
+        os.makedirs(data_dir(), exist_ok=True)
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump({"records": records}, f, ensure_ascii=False, indent=2, sort_keys=True)
         os.replace(tmp, _PATH)

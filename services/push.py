@@ -22,9 +22,11 @@ import os
 
 import httpx
 
+from paths import data_dir
+
 log = logging.getLogger("push")
 
-_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+_DATA_DIR = data_dir()
 _PATH = os.path.join(_DATA_DIR, "push_settings.json")
 
 CHANNELS: tuple[str, ...] = ("none", "serverchan", "bark", "wecom")

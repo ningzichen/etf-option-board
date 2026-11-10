@@ -18,12 +18,12 @@ import json
 import logging
 import os
 
+from paths import data_path
 from services import em
 
 log = logging.getLogger("board_map")
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_MAP_FILE = os.path.join(_ROOT, "data", "tape_board_map.json")
+_MAP_FILE = data_path("tape_board_map.json")
 
 # 概念/行业板块清单（两套 fs 都是板块列表）
 _BOARD_FS = ("m:90+t:3", "m:90+t:2")

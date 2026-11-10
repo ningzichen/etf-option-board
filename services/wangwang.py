@@ -31,10 +31,11 @@ import time
 
 import httpx
 
+from paths import data_path
+
 log = logging.getLogger("wangwang")
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_DB_FILE = os.path.join(_ROOT, "data", "wangwang.db")
+_DB_FILE = data_path("wangwang.db")
 
 _QT = "https://qt.gtimg.cn/q="
 _SINA = ("https://quotes.sina.cn/cn/api/jsonp_v2.php/var%20_x=/"

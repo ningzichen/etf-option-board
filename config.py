@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional
 
+from paths import data_dir as _data_dir
+
 
 @dataclass
 class Settings:
@@ -11,8 +13,8 @@ class Settings:
     host: str = "0.0.0.0"
     port: int = 6799
 
-    # Paths
-    data_dir: str = "data"
+    # Paths（数据目录唯一入口见 paths.py：可用 ETF_DATA_DIR 整体搬到用户目录/卷）
+    data_dir: str = field(default_factory=_data_dir)
 
     # HTTP
     http_timeout: float = 6.0

@@ -17,10 +17,11 @@ import threading
 from contextlib import contextmanager
 from typing import Iterable
 
+from paths import data_dir
+
 log = logging.getLogger("boardflow")
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_DATA_DIR = os.path.join(_ROOT, "data")
+_DATA_DIR = data_dir()
 _DB_FILE = os.path.join(_DATA_DIR, "board_flow.db")
 _WATCH_FILE = os.path.join(_DATA_DIR, "board_watch.json")
 _ETF_WATCH_FILE = os.path.join(_DATA_DIR, "etf_watch.json")

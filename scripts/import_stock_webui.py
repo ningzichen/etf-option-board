@@ -26,7 +26,12 @@ import sqlite3
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TARGET = os.path.join(ROOT, "data", "board_flow.db")
+if ROOT not in sys.path:                 # 脚本运行时 sys.path[0] 是 scripts/，需补仓库根
+    sys.path.insert(0, ROOT)
+
+from paths import data_path  # noqa: E402  — 必须在 sys.path 注入之后导入
+
+TARGET = data_path("board_flow.db")      # 与服务同一口径，尊重 ETF_DATA_DIR
 SOURCE = os.getenv("STOCK_WEBUI_DB", "/Users/xinxin/workspace/stock-webui/data/board_flow.db")
 
 

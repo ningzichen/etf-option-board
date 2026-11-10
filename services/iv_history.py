@@ -12,9 +12,11 @@ import json
 import logging
 import os
 
+from paths import data_dir
+
 log = logging.getLogger("ivhist")
 
-_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+_DATA_DIR = data_dir()
 _PATH = os.path.join(_DATA_DIR, "iv_history.jsonl")
 
 

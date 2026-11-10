@@ -45,12 +45,12 @@ import re
 import sqlite3
 from typing import Any, Iterable
 
+from paths import data_path
 from services import em
 
 log = logging.getLogger("limitup")
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_DB_FILE = os.path.join(_ROOT, "data", "limitup.db")
+_DB_FILE = data_path("limitup.db")
 
 _ZT_URL = "https://push2ex.eastmoney.com/getTopicZTPool"
 _ZB_URL = "https://push2ex.eastmoney.com/getTopicZBPool"
@@ -92,7 +92,7 @@ _NOISE_SUBSTR = ("预增", "预减", "预亏", "扭亏", "中报", "三季报", 
                  "高送转", "填权", "摘帽", "举牌", "昨日", "打板", "表现", "连板", "重仓")
 
 
-_EXCLUDE_FILE = os.path.join(_ROOT, "data", "limitup_exclude.json")
+_EXCLUDE_FILE = data_path("limitup_exclude.json")
 DEFAULT_EXCLUDE = ["央国企改革"]
 
 

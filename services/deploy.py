@@ -22,11 +22,13 @@ import logging
 import os
 import py_compile
 
+from paths import data_path
+
 log = logging.getLogger("deploy")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TOKEN_PATH = os.path.join(ROOT, "data", ".deploy_token")
-STATUS_PATH = os.path.join(ROOT, "data", ".deploy_status")
+TOKEN_PATH = data_path(".deploy_token")
+STATUS_PATH = data_path(".deploy_status")
 _BUILD_TIMEOUT = 300
 
 

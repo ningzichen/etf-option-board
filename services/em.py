@@ -20,6 +20,7 @@ from urllib.parse import urlencode
 import httpx
 
 from config import settings
+from paths import data_path
 
 log = logging.getLogger("em")
 
@@ -826,9 +827,7 @@ _FLOW_HIST: dict[str, list[str]] = {}   # 当日累积
 _FLOW_PREV: dict[str, list[str]] = {}   # 最近一个有数据的昨日
 _FLOW_DAY: str | None = None            # _FLOW_HIST 对应的日期
 _FLOW_MAX = 240
-_FLOW_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "data", "flow_history.jsonl")
+_FLOW_PATH = data_path("flow_history.jsonl")
 _FLOW_LOADED = False
 _FLOW_FLUSHED: dict[str, str] = {}  # secid -> 已落盘的最后分钟 "YYYY-MM-DD HH:MM"
 
@@ -1018,9 +1017,7 @@ _IDX_HIST: dict[str, list[str]] = {}
 _IDX_PREV: dict[str, list[str]] = {}
 _IDX_DAY: str | None = None
 _IDX_MAX = 240
-_IDX_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "data", "index_history.jsonl")
+_IDX_PATH = data_path("index_history.jsonl")
 _IDX_LOADED = False
 _IDX_FLUSHED: dict[str, str] = {}
 
@@ -1161,18 +1158,14 @@ _OPT_HIST: dict[str, list[str]] = {}   # 当日累积
 _OPT_PREV: dict[str, list[str]] = {}   # 最近一个有数据的昨日
 _OPT_DAY: str | None = None
 _OPT_MAX = 240
-_OPT_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "data", "opt_history.jsonl")
+_OPT_PATH = data_path("opt_history.jsonl")
 _OPT_LOADED = False
 _OPT_FLUSHED: dict[str, str] = {}      # secid -> 已落盘的最后分钟
 
 # 全市场合约清单：ulist 批量报价需要先知道 secid，而 clist（唯一能翻出全量清单的接口）
 # 也会被接口级封禁。所以清单落盘复用：clist 能翻的时候建一次，之后每分钟只用 ulist
 # 更新价格（1 次 400 只，实测净耗时 0.2s）。
-_OPT_UNIVERSE_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "data", "option_universe.json")
+_OPT_UNIVERSE_PATH = data_path("option_universe.json")
 _OPT_UNIVERSE: list[str] = []
 _OPT_UNIVERSE_LOADED = False
 _ULIST_URL = "https://push2.eastmoney.com/api/qt/ulist.np/get"

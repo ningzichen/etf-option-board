@@ -13,11 +13,12 @@ import json
 import logging
 import os
 
+from paths import data_dir
 from services.decision import SIZE_LABELS, SIZES, TIER_LABELS, TIERS
 
 log = logging.getLogger("settings")
 
-_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+_DATA_DIR = data_dir()
 _PATH = os.path.join(_DATA_DIR, "settings.json")
 
 # 单笔风险%三档。与风险偏好档联动：1%→保守 / 2%→标准 / 3%→激进。

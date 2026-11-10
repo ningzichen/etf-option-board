@@ -33,6 +33,7 @@ import logging
 import os
 from collections import deque
 
+from paths import data_path
 from services import alerts, em, money as money_fmt, option_service as osvc, strategy
 from services.indicators import macd, macd_state
 
@@ -59,9 +60,7 @@ _state: dict[str, tuple[str, float, float]] = {}  # code -> (方向, 分数, 时
 # 落盘：这两份都是「当日」语义，重启/部署后必须还在——否则左栏变盘角标、分时图标记、
 # 方向加分（±15）全部丢失，要等下一次真实变盘才回来（每次发版都会踩一次）。
 # 跨日文件直接作废（旧信号对新交易日没有意义），写入时只保留当天。
-_SIG_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "data", "reversal_signals.json")
+_SIG_PATH = data_path("reversal_signals.json")
 _loaded = False
 
 
